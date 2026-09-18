@@ -18,6 +18,7 @@
 - **过滤**：F3 过滤已实现（ST / 次新 / 涨跌停），历史信号已回填，filter_version=v1_f3
 - **回测**：双口径（按信号 / 按交易日）x 5/10/20 日，结果在 backtest 表；入场按确认日次一交易日开盘（ADR-011）
 - **三日期**：signals 表已加 confirm_date / entry_ref_price / backfill_note，历史 16 条已回填（ADR-012）
+- **报告**：report_builder.py 生成 reports/YYYY-MM-DD/report.md（规则生成；三日期+时效提示+过滤说明+回测参考；未接 LLM）
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
 
 ## 已知待办

@@ -192,7 +192,7 @@ def render_signals(sigs, report_date, cal):
               f"缠论「笔」需要后续 K 线才能确认，**这些信号暂不可作为操作依据**。", ""]
 
     s = next((x for x in show if x["confirm_date"]), show[0])
-    title = "最近一条**已确认**信号的三日期" if s["confirm_date"] else "最近一条信号的三日期"
+    title = "最近一条已确认信号的三日期" if s["confirm_date"] else "最近一条信号的三日期"
     L += [f"**{title}**", "",
           "| 项 | 值 | 含义 |", "| --- | --- | --- |",
           f"| 信号日 signal_date | {s['signal_date']} | 缠论信号实际发生日（触发笔结束日）|",
