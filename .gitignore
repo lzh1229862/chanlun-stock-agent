@@ -17,6 +17,7 @@ htmlcov/
 # 数据与输出（本地行情数据不入库）
 data/
 output/
+reports/
 *.csv
 *.parquet
 *.xlsx
