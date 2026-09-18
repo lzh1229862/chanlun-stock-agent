@@ -1,0 +1,356 @@
+"""T5-1 Markdown 报告构建（规则生成，暂不接 LLM）。
+
+输出
+    reports/YYYY-MM-DD/report.md
+
+重点（ADR-011 / ADR-012）
+    - 每个信号必须同时标注：信号日 signal_date / 确认日 confirm_date / 入场参考价 entry_ref_price
+    - 信号日 != 确认日时，显式提示「本信号为 X 个交易日前发出」，避免用户误以为是当日新信号
+    - confirm_date 为 NULL 表示「尚未确认」，报告标为待确认、不可操作
+
+运行
+    python report_builder.py                  # 生成今日报告
+    python report_builder.py --date 2026-09-18
+    python report_builder.py --code 600519    # 只报指定股票
+    python report_builder.py --stdout         # 直接打印，不落盘
+"""
+import argparse
+from collections import defaultdict
+from datetime import date
+from pathlib import Path
+
+import czsc
+import pandas as pd
+
+from confirm_dates import load_frames
+from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_zs
+from signal_filter import fetch_name, trading_calendar
+from storage_signal import query_signals
+
+# ==================== 报告模板配置（调整报告改这里） ====================
+
+REPORT_TITLE = "缠论分析日报"
+OUTPUT_DIR = Path("reports")
+
+DISCLAIMER = """
+> **非投资建议**：本报告由程序按缠论规则自动生成，仅是对价格结构的算法化描述，
+> 不构成任何投资建议，不承诺收益，不含自动下单。据此操作风险自负。
+""".strip()
+
+MAX_SIGNALS_PER_STOCK = 5       # 每只股票最多展示几条信号明细
+STRUCTURE_BI_SHOW = 3           # 结构段展示几笔
+RECENT_TRADING_DAYS = 20        # 多少交易日内算「近期信号」
+BACKTEST_SCOPE = "signal"       # 回测参考用哪个口径：signal（按信号）/ day（按交易日）
+
+FILTER_LEGEND = {
+    "st": "ST/*ST", "delisted": "退市整理", "new": "次新股（上市不足 60 交易日）",
+    "limitup": "买点当日涨停，买不进", "limitdown": "卖点当日跌停，卖不出",
+}
+
+
+# ==================== 工具 ====================
+
+def pct(x, nd=2):
+    return f"{x:+.{nd}%}" if x is not None else "—"
+
+
+def num(x, nd=2):
+    return f"{x:.{nd}f}" if x is not None else "—"
+
+
+def trading_days_between(cal, a, b):
+    """(a, b] 之间的交易日数。"""
+    a, b = pd.Timestamp(a), pd.Timestamp(b)
+    return sum(1 for d in cal if a < d <= b)
+
+
+def filter_note(filter_version, is_tradable):
+    if is_tradable:
+        return "可交易"
+    fv = filter_version or ""
+    codes = fv.split(":", 1)[1] if ":" in fv else ""
+    if not codes:
+        return "不可交易（原因未记录）"
+    return "不可交易：" + "；".join(FILTER_LEGEND.get(c, c) for c in codes.split("+"))
+
+
+def staleness(sig, report_date, cal):
+    """返回 (时效标签, 提示文本)。"""
+    sd, cd = sig["signal_date"], sig["confirm_date"]
+    if not cd:
+        return "待确认", (f"> ⚠️ **该信号尚未确认**（信号日 {sd}）。缠论「笔」需要后续 K 线才能确认，"
+                          f"当前数据不足以判定确认日，**暂不可作为操作依据**。")
+    k = trading_days_between(cal, sd, cd)
+    since = trading_days_between(cal, cd, report_date)
+    label = "近期" if since <= RECENT_TRADING_DAYS else "历史"
+    if since == 0:
+        txt = (f"> ⚠️ **本信号为 {k} 个交易日前发出（{sd}），今日（{cd}）确认。**"
+               f"信号日与确认日不同，**它不是今日盘中就能得知的信号**。")
+    else:
+        txt = (f"> ⚠️ **本信号 {sd} 发出、{cd} 确认**（发出到确认相隔 {k} 个交易日；"
+               f"确认至今已 {since} 个交易日）。**不是今日新产生的信号**，请勿当作即时入场提示。")
+    return label, txt
+
+
+# ==================== 结构计算 ====================
+
+def stock_structure(code):
+    raw, q = load_frames(code)
+    if q.empty:
+        return None
+    qq = q.rename(columns={"volume": "vol"}).copy()
+    qq["dt"] = pd.to_datetime(qq["date"])
+    qq["symbol"] = code
+    bars = czsc.format_standard_kline(qq, freq=czsc.Freq.D)
+    cz = czsc.CZSC(bars, min_bi_len=MIN_BI_LEN, max_bi_num=MAX_BI_NUM)
+    bis = list(cz.bi_list)
+    zss = build_zs(bis)
+    close = float(q["close"].iloc[-1])
+
+    pos, z = "无中枢", (zss[-1] if zss else None)
+    if z:
+        pos = "中枢上方" if close > z["zg"] else ("中枢下方" if close < z["zd"] else "中枢内部")
+    return {"close": close, "close_raw": float(raw["close"].iloc[-1]),
+            "last_date": str(raw["date"].iloc[-1].date()), "zs": z, "position": pos,
+            "bis": bis[-STRUCTURE_BI_SHOW:], "n_bi": len(bis), "n_zs": len(zss),
+            "fx": len(list(cz.fx_list))}
+
+
+# ==================== 各段落渲染 ====================
+
+def render_overview(report_date, stocks, all_, tradable, primary, pending):
+    return "\n".join([
+        "## 报告概览", "",
+        "| 项 | 值 |", "| --- | --- |",
+        f"| 报告日期 | {report_date} |",
+        f"| 股票池 | {'、'.join(stocks)}（{len(stocks)} 只）|",
+        f"| 信号总数 | {len(all_)} |",
+        f"| 可交易信号 | {len(tradable)} |",
+        f"| 其中主信号 | {len(primary)} |",
+        f"| 待确认信号 | {len(pending)} |",
+        "",
+    ])
+
+
+def render_staleness_alert(report_date, all_, cal):
+    dated = [s for s in all_ if s["confirm_date"]]
+    L = ["## ⏱ 信号时效提醒", ""]
+    today_sig = [s for s in dated if s["confirm_date"] == report_date]
+    if today_sig:
+        L.append(f"本次有 **{len(today_sig)}** 条信号在 {report_date} 确认（处于可操作窗口）。")
+    else:
+        L.append(f"**本次没有在 {report_date} 确认的新信号。**")
+    if dated:
+        lags = [trading_days_between(cal, s["signal_date"], s["confirm_date"]) for s in dated]
+        L += ["",
+              f"报告中信号的「信号日 → 确认日」延迟：最小 {min(lags)}、最大 {max(lags)} 个交易日"
+              f"（缠论「笔」需后续 K 线确认，见 ADR-011）。",
+              "**任何一条信号都不是当日盘中即可得知的**，请务必对照每条的信号日与确认日。"]
+    if all_ and not dated:
+        L += ["", "⚠️ 全部信号目前都处于**待确认**状态，暂不可作为操作依据。"]
+    L.append("")
+    return "\n".join(L)
+
+
+def render_structure(st):
+    L = ["**当前缠论结构**（前复权口径，前复权价 = 不复权价 / qfq_factor）", ""]
+    if not st:
+        return "\n".join(L + ["- 本地无 K 线数据，无法计算结构", ""])
+    L += [f"- 最新交易日：{st['last_date']}    最新收盘：{num(st['close_raw'])}（不复权）",
+          f"- 结构规模：{st['fx']} 个分型 / {st['n_bi']} 笔 / {st['n_zs']} 个中枢"]
+    z = st["zs"]
+    if z:
+        L += [f"- 最近中枢：{z['sdt'].date()} ~ {z['edt'].date()}，"
+              f"区间 [{num(z['zd'])} , {num(z['zg'])}]，含 {z['n']} 笔",
+              f"- **价格位置：{st['position']}**"]
+    else:
+        L.append("- 未识别到中枢")
+    L += ["", f"- 最新 {STRUCTURE_BI_SHOW} 笔：", "",
+          "  | 起 | 止 | 方向 | 价格区间 |", "  | --- | --- | --- | --- |"]
+    for b in st["bis"]:
+        L.append(f"  | {b.sdt.date()} | {b.edt.date()} | {b.direction} | {num(b.low)} ~ {num(b.high)} |")
+    L.append("")
+    return "\n".join(L)
+
+
+def render_signals(sigs, report_date, cal):
+    show = sigs[-MAX_SIGNALS_PER_STOCK:][::-1]
+    L = [f"**信号明细**（最近 {len(show)} 条，按信号日倒序）", "",
+         "| 信号日 | 确认日 | 类型 | 入场参考价 | 时效 | 可交易 | 主信号 |",
+         "| --- | --- | --- | --- | --- | --- | --- |"]
+    for s in show:
+        label, _ = staleness(s, report_date, cal)
+        L.append(f"| {s['signal_date']} | {s['confirm_date'] or '**待确认**'} | {s['signal_type']} | "
+                 f"{num(s['entry_ref_price'])} | {label} | {'✅' if s['is_tradable'] else '❌'} | "
+                 f"{'★' if s['is_primary'] else ''} |")
+    L.append("")
+
+    pend = [s for s in show if not s["confirm_date"]]
+    if pend:
+        L += [f"> ⚠️ 上表中有 **{len(pend)} 条信号尚未确认**"
+              f"（{'、'.join(s['signal_date'] for s in pend)}）。"
+              f"缠论「笔」需要后续 K 线才能确认，**这些信号暂不可作为操作依据**。", ""]
+
+    s = next((x for x in show if x["confirm_date"]), show[0])
+    title = "最近一条**已确认**信号的三日期" if s["confirm_date"] else "最近一条信号的三日期"
+    L += [f"**{title}**", "",
+          "| 项 | 值 | 含义 |", "| --- | --- | --- |",
+          f"| 信号日 signal_date | {s['signal_date']} | 缠论信号实际发生日（触发笔结束日）|",
+          f"| 确认日 confirm_date | {s['confirm_date'] or '待确认'} | 信号可被确认的日期（笔需后续 K 线确认）|",
+          f"| 入场参考价 entry_ref_price | {num(s['entry_ref_price'])} | 确认日次一交易日**不复权**开盘价 |",
+          ""]
+    _, note = staleness(s, report_date, cal)
+    L += [note, ""]
+
+    L += ["**信号理由**", ""]
+    for s in show:
+        L.append(f"- {s['signal_date']} {s['signal_type']}：{s['signal_reason']}")
+    L.append("")
+
+    L += ["**过滤说明**", ""]
+    for s in show:
+        L.append(f"- {s['signal_date']} {s['signal_type']}："
+                 f"{filter_note(s['filter_version'], s['is_tradable'])}"
+                 f"（filter_version={s['filter_version']}）")
+    if show[0]["backfill_note"]:
+        L += ["", f"> 回填说明：{show[0]['backfill_note']}", ""]
+    return "\n".join(L)
+
+
+def render_backtest_ref(sigs, bt_stats):
+    types = sorted({s["signal_type"] for s in sigs})
+    scope_cn = "按信号" if BACKTEST_SCOPE == "signal" else "按交易日"
+    L = [f"**回测统计参考**（口径：{scope_cn}；入场=确认日次一交易日开盘，见 ADR-011）", "",
+         "| 类型 | 窗口 | 样本 | 平均收益 | 胜率 | 平均最大回撤 |",
+         "| --- | --- | --- | --- | --- | --- |"]
+    n = 0
+    for t in types:
+        for w in (5, 10, 20):
+            st = bt_stats.get((BACKTEST_SCOPE, w, t))
+            if st:
+                L.append(f"| {t} | {w}日 | {st['n']} | {pct(st['avg_return'])} | "
+                         f"{st['win_rate']:.1%} | {pct(st['avg_mdd'])} |")
+                n += 1
+    if n == 0:
+        L.append("| — | — | — | — | — | — |")
+    L += ["", "> ⚠️ 样本量很小（当前仅 1 只股票），统计值**不具解释力**，仅作管线演示。", ""]
+    return "\n".join(L)
+
+
+def one_line_conclusion(st, sigs, report_date, cal):
+    parts = []
+    if st:
+        tail = st["position"] if st["zs"] else "未识别到中枢"
+        parts.append(f"最新收盘 {num(st['close_raw'])}，价格位于最近{tail}")
+    if sigs:
+        s = sigs[-1]
+        label, _ = staleness(s, report_date, cal)
+        state = "可交易" if s["is_tradable"] else "不可交易"
+        parts.append(f"最近一条信号为 {s['signal_date']} 的**{s['signal_type']}**"
+                     f"（{s['confirm_date'] or '待确认'} 确认，入场参考价 {num(s['entry_ref_price'])}，"
+                     f"{state}，{label}信号）")
+        parts.append(f"该信号距今 {trading_days_between(cal, s['signal_date'], report_date)} 个交易日")
+    else:
+        parts.append("库中暂无该股信号")
+    return "；".join(parts) + "。"
+
+
+def render_stock(code, sigs, report_date, cal, bt_stats):
+    st = stock_structure(code)
+    try:
+        name = fetch_name(code)
+    except Exception:
+        name = ""
+    L = [f"### {code} {name}".rstrip(), "",
+         f"**一句话结论**：{one_line_conclusion(st, sigs, report_date, cal)}", ""]
+    L.append(render_structure(st))
+    if sigs:
+        L.append(render_signals(sigs, report_date, cal))
+        L.append(render_backtest_ref(sigs, bt_stats))
+    else:
+        L += ["**信号明细**：库中暂无该股信号。", ""]
+    return "\n".join(L)
+
+
+def render_footer():
+    return "\n".join([
+        "## 附录：口径说明", "",
+        "| 项 | 说明 |", "| --- | --- |",
+        "| 价格口径 | 报告中的价格均为**不复权**（盘面实际价）；结构段为前复权口径 |",
+        "| 信号日 | 触发笔结束日 = BI.edt = BI.fx_b.dt |",
+        "| 确认日 | 信号日 + 实测确认延迟（逐日放行 K 线重跑得出，ADR-011）|",
+        "| 入场参考价 | 确认日次一交易日不复权开盘价；与回测表 entry_price（前复权）口径不同 |",
+        "| 待确认 | confirm_date 为 NULL，表示当前数据不足以确认该信号，不可操作 |",
+        "| 过滤 | is_tradable，原因见 filter_version（如 v1_f3:limitup = 买点当日涨停）|",
+        "",
+        "---", "",
+        "*本报告由程序自动生成，非投资建议。*", "",
+    ])
+
+
+# ==================== 主流程 ====================
+
+def build_report(report_date=None, codes=None):
+    from backtest import query_backtest
+
+    report_date = str(report_date or date.today())
+    cal = trading_calendar()
+
+    sigs_all = query_signals()
+    if codes:
+        sigs_all = [s for s in sigs_all if s["stock_code"] in codes]
+    if not sigs_all:
+        return None, None
+
+    by_code = defaultdict(list)
+    for s in sigs_all:
+        by_code[s["stock_code"]].append(s)
+    for v in by_code.values():
+        v.sort(key=lambda x: x["signal_date"])
+
+    agg = defaultdict(list)
+    for r in query_backtest():
+        agg[(r["scope"], r["window"], r["signal_type"])].append(r)
+    bt_stats = {}
+    for k, v in agg.items():
+        rets = [x["return_pct"] for x in v]
+        bt_stats[k] = {"n": len(v), "avg_return": sum(rets) / len(rets),
+                       "win_rate": sum(x["is_win"] for x in v) / len(v),
+                       "avg_mdd": sum(x["max_drawdown"] for x in v) / len(v)}
+
+    tradable = [s for s in sigs_all if s["is_tradable"]]
+    primary = [s for s in sigs_all if s["is_primary"]]
+    pending = [s for s in sigs_all if not s["confirm_date"]]
+
+    parts = [f"# {REPORT_TITLE}  {report_date}", "", DISCLAIMER, "", "---", "",
+             render_overview(report_date, sorted(by_code), sigs_all, tradable, primary, pending),
+             "---", "", render_staleness_alert(report_date, sigs_all, cal),
+             "---", "", "## 个股分析", ""]
+    for code in sorted(by_code):
+        parts += [render_stock(code, by_code[code], report_date, cal, bt_stats), "---", ""]
+    parts.append(render_footer())
+    return "\n".join(parts), OUTPUT_DIR / report_date / "report.md"
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", default=None)
+    ap.add_argument("--code", action="append", default=None)
+    ap.add_argument("--stdout", action="store_true")
+    a = ap.parse_args()
+
+    md, out = build_report(a.date, a.code)
+    if md is None:
+        print("库中无信号，先生成信号（python run_round3.py）")
+        return
+    if a.stdout:
+        print(md)
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(md, encoding="utf-8")
+    print(f"报告已生成: {out.resolve()}")
+    print(f"  字符数 {len(md)}   行数 {md.count(chr(10)) + 1}")
+
+
+if __name__ == "__main__":
+    main()
