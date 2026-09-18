@@ -157,6 +157,24 @@ def apply_filter(code, decisions, filter_version):
     return len(rows), changed
 
 
+def set_primary(decisions):
+    """设置 is_primary（同日多信号的主次标记）。
+
+    decisions: [{"stock_code": "600519", "date": "2025-06-18",
+                 "type": "第三类卖点", "is_primary": 1}, ...]
+    只 UPDATE，不新增/删除行。返回 (匹配行数, 实际发生变更的行数)
+    """
+    init_db()
+    rows = [(int(d["is_primary"]), d["stock_code"], d["date"], d["type"]) for d in decisions]
+    with closing(connect()) as conn, conn:
+        before = conn.total_changes
+        conn.executemany(
+            "UPDATE signals SET is_primary = ?"
+            " WHERE stock_code = ? AND signal_date = ? AND signal_type = ?", rows)
+        changed = conn.total_changes - before
+    return len(rows), changed
+
+
 # ---------------- 命令行查看 ----------------
 
 def print_table(rows):
