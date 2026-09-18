@@ -84,7 +84,7 @@
 
 关键约束：
 
-- 收盘后 17:00 之后运行，确保当日日线数据完整。
+- 收盘后 18:00 之后运行，确保当日日线数据完整，同时避开 DeepSeek 高峰计价时段（高峰为北京时间周一至周五 9:00-12:00、14:00-18:00，空闲时段单价为高峰的 5 折）。
 - 校验不通过的股票跳过，不生成信号。
 
 ### 3.2 缠论计算
@@ -162,6 +162,8 @@
 - 大模型只做解释、归纳、风险提示。
 - 不参与买卖点判断。
 - 提示词明确写"只解释结构，不给买卖建议"。
+- 模型名使用 deepseek-flash（deepseek-chat 已下线，勿再使用）。
+- 必须显式关闭思考模式：extra_body={"thinking": {"type": "disabled"}}。思考模式默认开启且 effort 默认 high，不关闭会导致输出 token 与费用成倍增加。
 
 ### 3.7 Agent 编排
 
@@ -342,7 +344,7 @@ watchlist:
   - "600519"
   - "000001"
 
-run_time: "17:00"
+run_time: "18:00"      # 避开 DeepSeek 高峰计价时段
 db_path: "data/chan_agent.db"
 parquet_dir: "data/raw"
 
@@ -350,7 +352,7 @@ backtest_windows: [5, 10, 20]
 
 llm:
   provider: "deepseek"
-  model: "deepseek-chat"
+  model: "deepseek-flash"
   max_tokens: 2000
   cache: true
 
@@ -400,7 +402,7 @@ report:
 | czsc 在 Windows 装不上 | 阻塞开发 | 阶段 0 优先验证，必要时用 conda |
 | czsc 信号与缠论术语不一致 | 信号不可信 | 先记录原始信号，人工校准 |
 | 日线三类买卖点信号稀少 | 报告内容少 | 区分"新信号"和"当前区域" |
-| AKShare 数据延迟 | 信号错误 | 收盘后 17:00 之后运行，加校验 |
+| AKShare 数据延迟 | 信号错误 | 收盘后 18:00 之后运行，加校验 |
 | DeepSeek 成本超预期 | 费用高 | 只对有信号股票调用，加缓存 |
 | 回测未来函数 | 结果虚高 | 按时间切片逐日推进 |
 | 日线数据除权干扰 | 结构错误 | 用前复权 |
