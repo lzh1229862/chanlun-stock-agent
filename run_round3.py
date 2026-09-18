@@ -11,6 +11,7 @@ from datetime import date, timedelta
 import czsc
 import pandas as pd
 
+from confirm_dates import backfill as backfill_confirm
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_signals, build_zs
 from storage_kline import load_kline, parquet_path, update_kline
 from storage_signal import query_signals, save_signals
@@ -71,6 +72,10 @@ def main():
     added, skipped = save_signals(CODE, signals)
     total = len(query_signals(code=CODE))
     print(f"      新增 {added} 条   重复跳过 {skipped} 条   库中 {CODE} 合计 {total} 条")
+    print()
+
+    print("[5b] 回填确认日 / 入场参考价（方案 A：实测确认延迟）")
+    backfill_confirm(verbose=True)
     print()
 
     print(f"=== 完成，总耗时 {time.perf_counter() - t0:.2f}s ===")

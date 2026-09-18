@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS signals (
     filter_version TEXT    NOT NULL DEFAULT 'v0_no_filter',
     is_primary     INTEGER NOT NULL DEFAULT 1,
     signal_group_id TEXT   NOT NULL DEFAULT '',
+    confirm_date   TEXT,
+    entry_ref_price REAL,
+    backfill_note  TEXT,
     UNIQUE (stock_code, signal_date, signal_type)
 );
 CREATE INDEX IF NOT EXISTS idx_signals_code_date ON signals (stock_code, signal_date);
@@ -42,12 +45,17 @@ NEW_COLUMNS = [
     ("filter_version", "TEXT NOT NULL DEFAULT 'v0_no_filter'"),
     ("is_primary", "INTEGER NOT NULL DEFAULT 1"),
     ("signal_group_id", "TEXT NOT NULL DEFAULT ''"),
+    ("confirm_date", "TEXT"),
+    ("entry_ref_price", "REAL"),
+    ("backfill_note", "TEXT"),
 ]
 
 FIELDS = ["id", "stock_code", "signal_date", "signal_type", "signal_reason", "is_tradable",
-          "created_at", "filter_version", "is_primary", "signal_group_id"]
+          "created_at", "filter_version", "is_primary", "signal_group_id",
+          "confirm_date", "entry_ref_price", "backfill_note"]
 
 DEFAULT_FILTER_VERSION = "v0_no_filter"
+PENDING_NOTE = "待确认：信号日过近，等待后续 K 线确认（方案 A / ADR-012）"
 
 
 def connect():
@@ -98,15 +106,18 @@ def save_signals(code, signals, is_tradable=1, filter_version=DEFAULT_FILTER_VER
              int(s.get("is_tradable", is_tradable)), now,
              s.get("filter_version", filter_version),
              int(primary[(s["date"], s["type"])]),
-             f"{code}_{s['date']}") for s in signals]
+             f"{code}_{s['date']}",
+             s.get("confirm_date"),
+             s.get("entry_ref_price"),
+             s.get("backfill_note", PENDING_NOTE)) for s in signals]
 
     with closing(connect()) as conn, conn:
         before = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
         conn.executemany(
             "INSERT OR IGNORE INTO signals"
             " (stock_code, signal_date, signal_type, signal_reason, is_tradable, created_at,"
-            "  filter_version, is_primary, signal_group_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+            "  filter_version, is_primary, signal_group_id, confirm_date, entry_ref_price, backfill_note)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
         after = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
 
     added = after - before
@@ -175,6 +186,24 @@ def set_primary(decisions):
     return len(rows), changed
 
 
+def update_confirm_dates(updates):
+    """回填 confirm_date / entry_ref_price / backfill_note。
+
+    updates: [{"stock_code","date","type","confirm_date","entry_ref_price","backfill_note"}]
+    只 UPDATE，不新增/删除行。返回 (匹配行数, 实际变更行数)
+    """
+    init_db()
+    rows = [(d.get("confirm_date"), d.get("entry_ref_price"), d.get("backfill_note"),
+             d["stock_code"], d["date"], d["type"]) for d in updates]
+    with closing(connect()) as conn, conn:
+        before = conn.total_changes
+        conn.executemany(
+            "UPDATE signals SET confirm_date = ?, entry_ref_price = ?, backfill_note = ?"
+            " WHERE stock_code = ? AND signal_date = ? AND signal_type = ?", rows)
+        changed = conn.total_changes - before
+    return len(rows), changed
+
+
 # ---------------- 命令行查看 ----------------
 
 def print_table(rows):
@@ -182,11 +211,12 @@ def print_table(rows):
         print("  (无记录)")
         return
     print(f"  {'id':>4}  {'stock':<8}{'date':<12}{'type':<12}{'prim':<6}{'trad':<6}"
-          f"{'group':<18}{'filter_ver':<15}reason")
+          f"{'group':<18}{'confirm':<12}{'entry':<10}{'filter_ver':<14}reason")
     for r in rows:
         print(f"  {r['id']:>4}  {r['stock_code']:<8}{r['signal_date']:<12}{r['signal_type']:<12}"
               f"{r['is_primary']:<6}{r['is_tradable']:<6}{r['signal_group_id']:<18}"
-              f"{r['filter_version']:<15}{r['signal_reason'][:34]}")
+              f"{str(r['confirm_date'] or '-'):<12}{str(r['entry_ref_price'] or '-'):<10}"
+              f"{r['filter_version']:<14}{r['signal_reason'][:22]}")
 
 
 # ---------------- 演示 ----------------

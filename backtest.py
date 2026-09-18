@@ -33,6 +33,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from confirm_dates import confirmation_delay
 from storage_kline import load_kline
 from storage_signal import DB_PATH, connect, query_signals
 
@@ -108,36 +109,6 @@ def evaluate(bars, i_entry, window, direction, entry_price=None):
         "max_drawdown": round(mdd, 6),
         "is_win": 1 if navs[-1] > 1 else 0,
     }
-
-
-def compute_signals(bars_sub, code):
-    """在给定（已截断的）K 线上重跑信号生成，返回 {(日期, 类型)}。"""
-    import czsc
-
-    from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_signals, build_zs
-
-    q = bars_sub.rename(columns={"volume": "vol"}).copy()
-    q["dt"] = pd.to_datetime(q["date"])
-    q["symbol"] = code
-    b = czsc.format_standard_kline(q, freq=czsc.Freq.D)
-    cz = czsc.CZSC(b, min_bi_len=MIN_BI_LEN, max_bi_num=MAX_BI_NUM)
-    bis = list(cz.bi_list)
-    return {(x["date"], x["type"]) for x in build_signals(bis, build_zs(bis))}
-
-
-def confirmation_delay(bars, i_sig, code, signal_date, signal_type, max_k=30):
-    """信号日之后还需几个交易日才能确认该信号。
-
-    判据：把 K 线截断到「信号日 + k 个交易日」，重跑信号生成，若该信号出现则延迟为 k。
-    笔需要后续 K 线才能确认，所以延迟必然 >= 1；找不到返回 None。
-    """
-    for k in range(max_k + 1):
-        if i_sig + k >= len(bars):
-            return None
-        sub = bars[bars["date"] <= bars.at[i_sig + k, "date"]]
-        if (signal_date, signal_type) in compute_signals(sub, code):
-            return k
-    return None
 
 
 # ==================== 双口径回测 ====================
