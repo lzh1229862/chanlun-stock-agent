@@ -23,6 +23,9 @@ UP, DOWN = "向上", "向下"
 MIN_BI_LEN = 5
 MAX_BI_NUM = 500
 MAX_ZS_BIS = 9
+# 一类买卖点背驰的「力度容差」：要求当前笔的价格力度至少比对比笔弱 (1-POWER_TOL) 倍。
+# 0 表示不容差（严格小于）。取值依据见 docs/技术决策记录.md ADR-006 与 calib_beichi.py。
+POWER_TOL = 0.03
 FREQ = "日线"
 
 # ============================================================
@@ -135,7 +138,7 @@ def build_zs(bis, max_bis=MAX_ZS_BIS):
     return out
 
 
-def build_signals(bis, zss):
+def build_signals(bis, zss, power_tol=POWER_TOL):
     """三类买卖点，同时产出统一格式记录与 czsc 风格原始信号。"""
     rec, fb, fs = [], [], []
 
@@ -153,7 +156,7 @@ def build_signals(bis, zss):
         cur, prev, mid = bis[i], bis[i - 2], bis[i - 1]
         if str(prev.direction) != str(cur.direction) or str(mid.direction) == str(cur.direction):
             continue
-        weaker = cur.power_price < prev.power_price and (
+        weaker = cur.power_price < prev.power_price * (1 - power_tol) and (
             cur.power_volume < prev.power_volume or cur.length < prev.length)
         if str(cur.direction) == DOWN and cur.low < prev.low and weaker:
             fb.append(i)

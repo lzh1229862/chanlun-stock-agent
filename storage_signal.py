@@ -133,6 +133,27 @@ def query_signals(code=None, start=None, end=None, primary_only=False):
         return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 
+def apply_filter(code, decisions, filter_version):
+    """把过滤结果写回已有信号（UPDATE，不新增行）。
+
+    这是 F3 信号过滤的落地方式：过滤只改变信号的「可交易」属性与过滤版本，
+    不产生第二行数据，因此去重键保持 (stock_code, signal_date, signal_type) 不变。
+
+    decisions: [{"date": "2026-01-06", "type": "第一类卖点", "is_tradable": 0}, ...]
+    filter_version: 本次过滤规则版本，如 "v1_st_filter"
+    返回 (匹配并尝试更新的行数, 实际发生变更的行数)
+    """
+    init_db()
+    rows = [(int(d["is_tradable"]), filter_version, code, d["date"], d["type"]) for d in decisions]
+    with closing(connect()) as conn, conn:
+        before = conn.total_changes
+        conn.executemany(
+            "UPDATE signals SET is_tradable = ?, filter_version = ?"
+            " WHERE stock_code = ? AND signal_date = ? AND signal_type = ?", rows)
+        changed = conn.total_changes - before
+    return len(rows), changed
+
+
 # ---------------- 命令行查看 ----------------
 
 def print_table(rows):
