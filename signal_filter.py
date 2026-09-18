@@ -189,17 +189,20 @@ def filter_signals(code, signals, bars, context, min_days=MIN_LISTED_TRADING_DAY
     out = []
     for s in signals:
         d = pd.Timestamp(s["date"])
-        reasons, detail = [], {}
+        reasons, codes, detail = [], [], {}
 
         if context["is_st"]:
             reasons.append(f"ST 股（{context['name']}）")
+            codes.append("st")
         if context.get("is_delisted"):
             reasons.append(f"退市整理（{context['name']}）")
+            codes.append("delisted")
 
         n_days = listed_trading_days(context["calendar"], context["listing_date"], d)
         detail["上市交易日"] = n_days
         if n_days < min_days:
             reasons.append(f"次新股（上市 {n_days} 个交易日 < {min_days}）")
+            codes.append("new")
 
         i = pos.get(d)
         if i is None:
@@ -217,12 +220,15 @@ def filter_signals(code, signals, bars, context, min_days=MIN_LISTED_TRADING_DAY
             status, price = limit_status(close, prev_close, ratio, f_prev, f_today)
             if status == "涨停" and is_buy_point(s["type"]):
                 reasons.append(f"当日涨停 {price:.2f}，买不进")
+                codes.append("limitup")
             elif status == "跌停" and is_sell_point(s["type"]):
                 reasons.append(f"当日跌停 {price:.2f}，卖不出")
+                codes.append("limitdown")
             detail["涨跌停"] = status or "无"
 
         out.append({**s, "is_tradable": 0 if reasons else 1,
-                    "filter_reason": "；".join(reasons), "detail": detail})
+                    "filter_reason": "；".join(reasons),
+                    "filter_codes": "+".join(codes), "detail": detail})
     return out
 
 
@@ -284,6 +290,9 @@ def selftest():
     check("跌停日卖点原因含跌停", "跌停" in r[1]["filter_reason"], True)
     check("普通日买点 -> 可交易", r[2]["is_tradable"], 1)
     check("普通日无过滤原因", r[2]["filter_reason"], "")
+    check("普通日 filter_codes 为空", r[2]["filter_codes"], "")
+    check("涨停买点 filter_codes", r[0]["filter_codes"], "limitup")
+    check("跌停卖点 filter_codes", r[1]["filter_codes"], "limitdown")
     check("涨停日的卖点不被涨停过滤",
           filter_signals("600519", [{"date": "2026-01-06", "type": "第一类卖点"}], bars, base_ctx)[0]["is_tradable"], 1)
     check("跌停日的买点不被跌停过滤",
