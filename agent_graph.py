@@ -195,7 +195,10 @@ def validate_one(code, bars, trade_date, cal):
         issues.append(f"缺失交易日 {missing}/{len(expected)} = {rate:.1%} > {MAX_MISSING_RATE:.0%}")
 
     abn = int((bars["high"] < bars["low"]).sum()) + int((bars["close"] <= 0).sum())
-    chg = bars["close"].pct_change().abs()
+    # 涨跌幅检查必须用【前复权】价：不复权价在除权除息日会出现合法的巨大跳变
+    # （实测 002594 于 2025-07-29 除权：不复权 -66.94%，前复权 +0.37%）
+    base = bars["close"] / bars["qfq_factor"] if "qfq_factor" in bars.columns else bars["close"]
+    chg = base.pct_change().abs()
     abn += int((chg > MAX_ABS_CHANGE).sum())
     if abn:
         issues.append(f"异常价格行 {abn} 条")
