@@ -2,7 +2,7 @@
 
 股票池来源优先级：
     config/watchlist.local.yaml   <- UI「替换股票池」写进去的；存在且非空则优先
-    config/settings.yaml          <- 仓库自带的默认值（12 只样本股）
+    config/settings.yaml          <- 仓库自带的默认值（10 只样本股，与 MAX_STOCKS 对齐）
 
 这样 UI 改池子不会污染版本库里的 settings.yaml，想恢复默认删掉 local 文件即可。
 """

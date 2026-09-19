@@ -196,6 +196,10 @@ class TestWatchlistStore(unittest.TestCase):
     def test_default_pool_comes_from_repo_settings(self):
         self.assertIn("600519", watchlist_store.load_default())
 
+    def test_default_pool_within_limit(self):
+        """仓库默认池不得超过 UI 上限，否则页面一打开就报错、两个按钮全灰。"""
+        self.assertLessEqual(len(watchlist_store.load_default()), watchlist_store.MAX_STOCKS)
+
     def test_report_builder_delegates_to_store(self):
         import report_builder
         self.assertEqual(report_builder.load_watchlist(), watchlist_store.load_watchlist())

@@ -84,8 +84,8 @@ def render_pool_page():
                         help=f"每行一个，或用逗号/空格分隔；最多 {MAX_STOCKS} 只，6 位数字")
     codes = parse_codes(text)
     ok_codes, bad = validate_codes(codes)
-    # 上限只约束用户自己设的池；仓库默认池是 12 只技术样本，原样不动就不拦，
-    # 否则一打开页面就报「最多 10 只」、两个按钮全灰，什么也干不了。
+    # 上限只约束用户自己设的池：仓库默认池若被改成超过 MAX_STOCKS（历史样本），
+    # 原样不动就不拦，否则一打开页面就报「最多 10 只」、两个按钮全灰，什么也干不了。
     too_many = len(ok_codes) > MAX_STOCKS and ok_codes != pool
 
     if bad:
