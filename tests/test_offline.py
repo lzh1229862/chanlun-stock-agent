@@ -5,7 +5,9 @@
 """
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -17,6 +19,7 @@ import pandas as pd
 import analyzer
 import signal_filter
 import storage_kline as sk
+import watchlist_store
 
 # 刻意选一个本地不会有的代码，保证用例不受开发机上的缓存数据影响
 EMPTY_CODE = "999999"
@@ -139,6 +142,63 @@ class TestModulesImport(unittest.TestCase):
         for m in self.MODULES:
             with self.subTest(module=m):
                 __import__(m)
+
+
+class TestWatchlistStore(unittest.TestCase):
+    """自选股池读写：解析、校验、保存、恢复默认（ADR-016）。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._saved = watchlist_store.LOCAL_PATH
+        watchlist_store.LOCAL_PATH = Path(self._tmp.name) / "watchlist.local.yaml"
+
+    def tearDown(self):
+        watchlist_store.LOCAL_PATH = self._saved
+        self._tmp.cleanup()
+
+    def test_max_stocks_is_ten(self):
+        self.assertEqual(watchlist_store.MAX_STOCKS, 10)
+
+    def test_parse_mixed_separators_and_dedup(self):
+        got = watchlist_store.parse_codes("600519, 601318\n000001、000002; 600519")
+        self.assertEqual(got, ["600519", "601318", "000001", "000002"])
+
+    def test_parse_empty(self):
+        self.assertEqual(watchlist_store.parse_codes(""), [])
+        self.assertEqual(watchlist_store.parse_codes(None), [])
+
+    def test_validate_rejects_non_six_digit(self):
+        ok, bad = watchlist_store.validate_codes(["600519", "60051", "abcd", "000001"])
+        self.assertEqual(ok, ["600519", "000001"])
+        self.assertEqual([c for c, _ in bad], ["60051", "abcd"])
+
+    def test_save_then_load_roundtrip(self):
+        watchlist_store.save_watchlist(["600519", "000001"])
+        self.assertTrue(watchlist_store.is_custom())
+        self.assertEqual(watchlist_store.load_watchlist(), ["600519", "000001"])
+
+    def test_save_strips_blanks(self):
+        watchlist_store.save_watchlist(["600519", "", "  ", "000001"])
+        self.assertEqual(watchlist_store.load_watchlist(), ["600519", "000001"])
+
+    def test_reset_falls_back_to_repo_default(self):
+        watchlist_store.save_watchlist(["600519"])
+        self.assertTrue(watchlist_store.reset_watchlist())
+        self.assertFalse(watchlist_store.is_custom())
+        self.assertEqual(watchlist_store.load_watchlist(), watchlist_store.load_default())
+
+    def test_empty_or_corrupt_local_falls_back(self):
+        watchlist_store.LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        watchlist_store.LOCAL_PATH.write_text("watchlist: []\n", encoding="utf-8")
+        self.assertFalse(watchlist_store.is_custom())
+        self.assertEqual(watchlist_store.load_watchlist(), watchlist_store.load_default())
+
+    def test_default_pool_comes_from_repo_settings(self):
+        self.assertIn("600519", watchlist_store.load_default())
+
+    def test_report_builder_delegates_to_store(self):
+        import report_builder
+        self.assertEqual(report_builder.load_watchlist(), watchlist_store.load_watchlist())
 
 
 if __name__ == "__main__":

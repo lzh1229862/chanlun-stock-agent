@@ -12,32 +12,198 @@
     第 3 步 历史查询      先查 SQLite，有则展示，无则实时分析；含「强制刷新」
     第 4 步 可视化        K 线 + 分型 / 笔 / 中枢 / 买卖点标注
     第 5 步 LLM 按需      先出规则结果，「生成 AI 总结」按钮
+    第 6 步 自选股与日报  编辑股票池（写 config/watchlist.local.yaml）+ 查看历史日报
 """
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from analyzer import analyze_stock, generate_llm_summary, load_from_db, load_ohlc
+from analyzer import (analyze_stock, ensure_kline, generate_llm_summary, load_from_db,
+                      load_ohlc)
+from storage_kline import load_kline
+from watchlist_store import (MAX_STOCKS, is_custom, load_default, load_watchlist,
+                             parse_codes, reset_watchlist, save_watchlist, validate_codes)
 
 LEVEL_TAG = {"第一类买点": "1买", "第二类买点": "2买", "第三类买点": "3买",
              "第一类卖点": "1卖", "第二类卖点": "2卖", "第三类卖点": "3卖"}
 
+REPORT_DIR = Path("reports")
+
+
+def list_daily_reports():
+    """reports/ 下有 report.md 的日期目录，倒序。"""
+    if not REPORT_DIR.exists():
+        return []
+    return sorted([p.name for p in REPORT_DIR.iterdir()
+                   if p.is_dir() and (p / "report.md").exists()], reverse=True)
+
+
+def warm_up(codes):
+    """保存股票池前逐只试拉一次数据，顺便把历史补齐。
+
+    返回 (预热成功的代码, [(代码, 失败原因), ...], 总行数)。
+    """
+    warmed, failed, rows = [], [], 0
+    bar = st.progress(0.0, text="准备中…")
+    for i, c in enumerate(codes, 1):
+        bar.progress((i - 1) / len(codes), text=f"[{i}/{len(codes)}] 校验并拉取 {c} …")
+        try:
+            src, err = ensure_kline(c, str(date.today()))
+        except Exception as e:
+            src, err = None, f"{type(e).__name__}: {e}"
+        if src is None:
+            failed.append((c, err or "拿不到数据"))
+        else:
+            warmed.append(c)
+            try:
+                rows += len(load_kline(c))
+            except Exception:
+                pass
+    bar.progress(1.0, text="完成")
+    return warmed, failed, rows
+
+
+def render_pool_page():
+    """自选股编辑 + 历史日报查看（页面下半部分就是日报，点开即读）。"""
+    st.title("自选股与日报")
+    st.caption("股票池决定每日批处理扫哪些股票；改完第二天（周一至周五 18:05 的计划任务）自动生效。")
+
+    pool = load_watchlist()
+    custom = is_custom()
+    src_txt = ("自定义（config/watchlist.local.yaml）" if custom
+               else "仓库默认（config/settings.yaml）")
+    st.caption(f"当前池 **{len(pool)}** 只 · 来源：{src_txt}")
+
+    st.subheader("编辑股票池")
+    ver = st.session_state.get("pool_ver", 0)
+    text = st.text_area("股票代码", value=chr(10).join(pool), height=200,
+                        key=f"pool_text_{ver}",
+                        help=f"每行一个，或用逗号/空格分隔；最多 {MAX_STOCKS} 只，6 位数字")
+    codes = parse_codes(text)
+    ok_codes, bad = validate_codes(codes)
+    too_many = len(ok_codes) > MAX_STOCKS
+
+    if bad:
+        st.error("这些不是有效代码：" + "、".join(f"`{c}`（{why}）" for c, why in bad))
+    if too_many:
+        st.error(f"最多 {MAX_STOCKS} 只，当前填了 {len(ok_codes)} 只")
+    if ok_codes and not bad and not too_many:
+        if ok_codes == pool:
+            st.caption(f"与当前池一致（{len(ok_codes)} 只），无需替换。")
+        else:
+            st.caption(f"将替换为 {len(ok_codes)} 只：" + "、".join(ok_codes))
+
+    can_save = bool(ok_codes) and not bad and not too_many and ok_codes != pool
+    c1, c2 = st.columns([1, 1])
+    if c1.button("替换股票池", type="primary", width="stretch", disabled=not can_save):
+        st.session_state["pool_pending"] = ok_codes
+    if c2.button(f"恢复默认（{len(load_default())} 只）", width="stretch",
+                 disabled=not custom):
+        reset_watchlist()
+        st.session_state["pool_ver"] = ver + 1
+        st.session_state["pool_result"] = {"saved": load_watchlist(), "failed": [],
+                                           "rows": 0, "reset": True}
+        st.rerun()
+
+    pending = st.session_state.get("pool_pending")
+    if pending:
+        st.warning(
+            f"**确认替换？** 股票池将从 {len(pool)} 只变成 {len(pending)} 只："
+            + "、".join(pending) + chr(10) + chr(10)
+            + "⚠️ **换池后前几天，新股票报告里的「回测统计」一栏会是空的 —— 这是正常的。**"
+            + chr(10) + chr(10)
+            + "回测统计用的是数据库里**已有的历史信号**，新股票还没积累；而且缠论信号本身"
+            + "有 1~2 个交易日的确认延迟（ADR-011），历史信号只能一天天攒起来。"
+            + chr(10)
+            + "结构、买卖点、过滤结果、AI 总结这些内容当天就有。"
+        )
+        c1, c2 = st.columns([1, 1])
+        if c1.button("确认替换", type="primary", width="stretch"):
+            with st.spinner("逐只校验并预热数据（首次会慢一些）…"):
+                warmed, failed, rows = warm_up(pending)
+            saved = save_watchlist(pending)
+            st.session_state["pool_result"] = {"saved": saved, "failed": failed,
+                                               "rows": rows}
+            st.session_state.pop("pool_pending", None)
+            st.session_state["pool_ver"] = ver + 1
+            st.rerun()
+        if c2.button("取消", width="stretch"):
+            st.session_state.pop("pool_pending", None)
+            st.rerun()
+
+    info = st.session_state.pop("pool_result", None)
+    if info:
+        if info.get("reset"):
+            st.success(f"已恢复仓库默认池（{len(info['saved'])} 只）。")
+        else:
+            st.success(f"股票池已更新为 {len(info['saved'])} 只：" + "、".join(info["saved"]))
+        if info["failed"]:
+            st.error("以下代码拉不到数据，**建议删掉后重新保存**"
+                     "（可能是无效代码、已退市，或当时网络不通）："
+                     + chr(10) + chr(10)
+                     + chr(10).join(f"- `{c}`：{why}" for c, why in info["failed"]))
+        if info["rows"]:
+            st.caption(f"已预热历史数据共 {info['rows']} 行；第二天批处理不用再临时拉取。")
+
+    st.divider()
+    st.subheader("历史日报")
+    dates = list_daily_reports()
+    if not dates:
+        st.info("还没有日报。跑一次 `python main.py`，或双击 `run.bat`，就会有第一份。")
+        return
+    st.caption(f"共 {len(dates)} 份（reports/ 目录，每天一份全池报告）")
+    pick = st.selectbox("选择日期", dates, key="report_pick")
+    if st.button("查看这份日报", width="stretch"):
+        st.session_state["view_report"] = pick
+
+    view = st.session_state.get("view_report")
+    if not view:
+        return
+    path = REPORT_DIR / view / "report.md"
+    if not path.exists():
+        st.error(f"文件不存在：{path}")
+        return
+    st.divider()
+    head = st.columns([3, 1])
+    head[0].subheader(f"日报 · {view}")
+    csv_path = path.parent / "signals.csv"
+    if csv_path.exists():
+        head[1].download_button("下载 signals.csv", csv_path.read_bytes(),
+                                file_name=f"signals-{view}.csv", mime="text/csv",
+                                width="stretch")
+    st.markdown(path.read_text(encoding="utf-8"))
+
+
 st.set_page_config(page_title="缠论分析 Agent", layout="wide")
 
-# ==================== 第 2 步：侧边栏（搜索框 + 分析按钮）====================
+# ==================== 第 2 步：侧边栏（模式切换 + 查询 / 股票池）====================
 with st.sidebar:
-    st.header("查询")
-    code_in = st.text_input("股票代码", value="600519", max_chars=6, help="6 位 A 股代码")
-    date_in = st.date_input("报告日期", value=date.today())
+    mode = st.radio("模式", ["单股分析", "自选股与日报"], label_visibility="collapsed")
     st.divider()
-    force = st.checkbox("强制刷新", value=False, help="跳过本地历史，重新实时计算")
-    with_llm = st.checkbox("分析时立即调用 LLM", value=False, help="默认关闭：先看规则结果，再按需生成")
-    run_btn = st.button("开始分析", type="primary", width="stretch")
-    st.divider()
-    st.caption("数据：本地 Parquet（腾讯日线 + 前复权因子）")
-    st.caption("信号 / 回测 / LLM：本地 SQLite")
+
+    if mode == "单股分析":
+        st.header("查询")
+        code_in = st.text_input("股票代码", value="600519", max_chars=6, help="6 位 A 股代码")
+        date_in = st.date_input("报告日期", value=date.today())
+        st.divider()
+        force = st.checkbox("强制刷新", value=False, help="跳过本地历史，重新实时计算")
+        with_llm = st.checkbox("分析时立即调用 LLM", value=False, help="默认关闭：先看规则结果，再按需生成")
+        run_btn = st.button("开始分析", type="primary", width="stretch")
+        st.divider()
+        st.caption("数据：本地 Parquet（腾讯日线 + 前复权因子）")
+        st.caption("信号 / 回测 / LLM：本地 SQLite")
+    else:
+        _pool = load_watchlist()
+        st.caption(f"当前股票池 **{len(_pool)}** 只"
+                   + ("（自定义）" if is_custom() else "（仓库默认）"))
+        st.caption("在右侧编辑股票池、查看历史日报。")
+
+if mode == "自选股与日报":
+    render_pool_page()
+    st.stop()
 
 # ==================== 第 3 步：先查历史，无则分析 ====================
 if run_btn:

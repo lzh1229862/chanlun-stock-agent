@@ -79,11 +79,13 @@ def trading_days_between(cal, a, b):
 
 
 def load_watchlist():
-    """自选股池，来自 config/settings.yaml 的 watchlist。"""
-    if not SETTINGS_PATH.exists():
-        return []
-    cfg = yaml.safe_load(SETTINGS_PATH.read_text(encoding="utf-8")) or {}
-    return [str(c) for c in (cfg.get("watchlist") or [])]
+    """自选股池。优先 config/watchlist.local.yaml（UI 保存的），否则 config/settings.yaml。
+
+    实际读写在 watchlist_store 里（ADR-016），这里保留同名函数只是为了让
+    agent_graph / main.py 这些老调用方不用改。
+    """
+    from watchlist_store import load_watchlist as _load
+    return _load()
 
 
 def filter_note(filter_version, is_tradable):

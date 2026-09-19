@@ -32,3 +32,6 @@ logs/
 *.swp
 .DS_Store
 Thumbs.db
+
+# 自定义股票池（UI 保存，属于个人配置）
+config/watchlist.local.yaml

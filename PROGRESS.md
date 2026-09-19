@@ -34,7 +34,10 @@
   `analyze_stock` / `load_from_db` 结果新增 `data_source`（cache / fetched / None）与 `data_error`；
   验收脚本 `verify_fallback.py`（22 项断言，`--offline` 可跳过联网用例）；`analyze_stock` 改为永不抛异常（薄包装 + `_analyze_impl`）
 - **CI**：`.github/workflows/ci.yml`（GitHub Actions，ubuntu-latest + Python 3.12）—— 装依赖 → `compileall` 语法检查 → 离线单测；
-  `tests/test_offline.py` 12 项断言、0.3 秒、不联网（所有出网口打桩），README 顶部挂 CI 徽章
+  `tests/test_offline.py` 22 项断言、0.4 秒、不联网（所有出网口打桩），README 顶部挂 CI 徽章
+- **自选股与日报**（T8 / ADR-016）：Web UI 加模式切换 —— 「自选股与日报」页可编辑股票池（上限 10 只，试拉校验 + 预热，两步确认）；
+  池子写 `config/watchlist.local.yaml`（不进版本库，local 优先于 settings.yaml），`watchlist_store.py` 为唯一读写入口；
+  同页下半部分列出 `reports/` 所有日报并可点开渲染 `report.md` / 下载 `signals.csv`
 
 ## 已知待办
 
