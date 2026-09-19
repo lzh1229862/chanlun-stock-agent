@@ -25,6 +25,8 @@
 - **入口**：main.py（PRD F7.3）支持 --date / --stocks / --no-llm / --nodes / --engine；运行日志落 logs/YYYY-MM-DD.json
 - **量能过滤**：F3.4 三条可选规则（susp/illiquid/volspike），默认关；配置在 config/settings.yaml
 - **定时任务**：scripts/install_schedule.bat 注册 ChanAgentDaily（周一至周五 18:05，非交易日自动跳过）
+- **Web UI**：app.py（Streamlit）搜索/分析/历史优先/K线标注/AI 按需；双击 run_ui.bat 启动 http://localhost:8501
+- **公共分析函数**：analyzer.py 提供 analyze_stock / load_from_db / generate_llm_summary / load_ohlc，CLI 与 UI 共用
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
 
 ## 已知待办

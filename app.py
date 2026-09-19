@@ -1,0 +1,219 @@
+"""缠论分析 Web UI（Streamlit）。
+
+后端逻辑一行未改 —— 全部通过 analyzer.py 调用。
+
+启动
+    python -m streamlit run app.py
+    或双击 run_ui.bat
+
+对应设计的 5 步
+    第 1 步 公共分析函数  analyzer.analyze_stock / load_from_db / generate_llm_summary / load_ohlc
+    第 2 步 最小界面      侧边栏搜索框 + 分析按钮 + 结果展示
+    第 3 步 历史查询      先查 SQLite，有则展示，无则实时分析；含「强制刷新」
+    第 4 步 可视化        K 线 + 分型 / 笔 / 中枢 / 买卖点标注
+    第 5 步 LLM 按需      先出规则结果，「生成 AI 总结」按钮
+"""
+from datetime import date
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+from analyzer import analyze_stock, generate_llm_summary, load_from_db, load_ohlc
+
+LEVEL_TAG = {"第一类买点": "1买", "第二类买点": "2买", "第三类买点": "3买",
+             "第一类卖点": "1卖", "第二类卖点": "2卖", "第三类卖点": "3卖"}
+
+st.set_page_config(page_title="缠论分析 Agent", layout="wide")
+
+# ==================== 第 2 步：侧边栏（搜索框 + 分析按钮）====================
+with st.sidebar:
+    st.header("查询")
+    code_in = st.text_input("股票代码", value="600519", max_chars=6, help="6 位 A 股代码")
+    date_in = st.date_input("报告日期", value=date.today())
+    st.divider()
+    force = st.checkbox("强制刷新", value=False, help="跳过本地历史，重新实时计算")
+    with_llm = st.checkbox("分析时立即调用 LLM", value=False, help="默认关闭：先看规则结果，再按需生成")
+    run_btn = st.button("开始分析", type="primary", width="stretch")
+    st.divider()
+    st.caption("数据：本地 Parquet（腾讯日线 + 前复权因子）")
+    st.caption("信号 / 回测 / LLM：本地 SQLite")
+
+# ==================== 第 3 步：先查历史，无则分析 ====================
+if run_btn:
+    code = (code_in or "").strip()
+    if len(code) != 6 or not code.isdigit():
+        st.error("请输入 6 位数字股票代码")
+        st.stop()
+
+    res, note = None, ""
+    with st.spinner("分析中…"):
+        if not force:
+            res = load_from_db(code, str(date_in))
+            if res is not None:
+                note = "命中本地历史（未重新计算）"
+        if res is None:
+            res = analyze_stock(code, str(date_in), use_llm=with_llm)
+            note = "强制刷新，已重新计算" if force else "本地无记录，已转为实时计算"
+    st.session_state["res"] = res
+    st.session_state["note"] = note
+
+res = st.session_state.get("res")
+if res is None:
+    st.title("缠论分析 Agent")
+    st.info("在左侧输入股票代码，点「开始分析」。")
+    st.caption("提示：本地有历史的股票会直接读库（快、不花钱）；没有历史的会实时计算。")
+    st.stop()
+
+if not res.get("ok"):
+    st.error(res.get("error") or "分析失败")
+    st.stop()
+
+st.title(f"{res['code']}　{res.get('name', '')}")
+st.caption(f"{res.get('board', '')} · 涨跌幅限制 ±{res.get('limit_ratio', 0):.0%}"
+           f" · 来源：{res.get('source')}（{st.session_state.get('note', '')}）"
+           f" · 耗时 {res.get('elapsed')}s")
+st.warning("**非投资建议**：本工具由程序按缠论规则自动生成结构化描述，"
+           "不构成任何投资建议，不承诺收益，不含自动下单。据此操作风险自负。")
+
+k = res.get("kline") or {}
+stt = res.get("structure") or {}
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("最新收盘（不复权）", k.get("close_raw"))
+c2.metric("价格位置", stt.get("position", "—"))
+c3.metric("信号数", len(res.get("signals") or []))
+c4.metric("可交易", res.get("tradable_count", 0))
+c5.metric("其中主信号", res.get("primary_count", 0))
+
+st.divider()
+
+# ==================== 第 4 步：K 线可视化 ====================
+st.subheader("K 线与缠论标注")
+df = load_ohlc(res["code"])
+if df.empty:
+    st.info("无 K 线数据")
+else:
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=df["date"], open=df["open"], high=df["high"],
+                                 low=df["low"], close=df["close"], name="K线",
+                                 increasing_line_color="#e2534b",
+                                 decreasing_line_color="#3ba272"))
+
+    for z in (stt.get("zs_list") or []):
+        fig.add_shape(type="rect", x0=z["sdt"], x1=z["edt"], y0=z["zd"], y1=z["zg"],
+                      fillcolor="rgba(110,110,240,0.16)",
+                      line=dict(color="rgba(110,110,240,0.55)", width=1), layer="below")
+
+    bis = stt.get("bi_list") or []
+    xs, ys = [], []
+    for b in bis:
+        p0 = b["low"] if b["direction"] == "向上" else b["high"]
+        p1 = b["high"] if b["direction"] == "向上" else b["low"]
+        if not xs:
+            xs.append(b["sdt"])
+            ys.append(p0)
+        xs.append(b["edt"])
+        ys.append(p1)
+    if xs:
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name="笔",
+                                 line=dict(color="#8a8a8a", width=1.2)))
+
+    fxs = stt.get("fx_list") or []
+    for tag, sym, color, name in (("顶", "triangle-down", "#d62728", "顶分型"),
+                                  ("底", "triangle-up", "#2ca02c", "底分型")):
+        pts = [f for f in fxs if tag in f["mark"]]
+        if pts:
+            fig.add_trace(go.Scatter(x=[f["dt"] for f in pts], y=[f["fx"] for f in pts],
+                                     mode="markers", name=name,
+                                     marker=dict(symbol=sym, size=7, color=color, opacity=0.7)))
+
+    # 用位置索引：df 有名为 date 的列，r.date 会遮蔽 Timestamp.date() 方法
+    pos = {str(d.date()): i for i, d in enumerate(df["date"])}
+    for sg in (res.get("signals") or []):
+        i = pos.get(str(sg["date"]))
+        if i is None:
+            continue
+        row = df.iloc[i]
+        is_buy = sg["direction"] == "买"
+        y = float(row["low"]) * 0.985 if is_buy else float(row["high"]) * 1.015
+        fig.add_trace(go.Scatter(
+            x=[row["date"]], y=[y], mode="markers+text",
+            text=[LEVEL_TAG.get(sg["type"], sg["type"][:3])],
+            textposition="bottom center" if is_buy else "top center",
+            name=sg["type"], showlegend=False,
+            marker=dict(symbol="star", size=14,
+                        color="#1a9850" if is_buy else "#d62728",
+                        line=dict(color="white", width=0.8)),
+            hovertemplate=(f"{sg['date']} {sg['type']}<br>"
+                           f"确认日 {sg.get('confirm_date') or '待确认'}<br>"
+                           f"入场参考 {sg.get('entry_ref_price') or '-'}"
+                           "<extra></extra>")))
+
+    fig.update_layout(height=580, xaxis_rangeslider_visible=False,
+                      margin=dict(l=8, r=8, t=28, b=8),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
+                      hovermode="x unified")
+    st.plotly_chart(fig, width="stretch")
+    st.caption("灰色折线 = 笔；蓝框 = 中枢；三角 = 分型；星标 = 买卖点（★绿=买 / ★红=卖）。"
+               "价格为前复权口径，与「最新收盘（不复权）」在历史日期上会有差异。")
+
+# ==================== 信号明细 ====================
+st.subheader("信号明细")
+sigs = res.get("signals") or []
+if sigs:
+    tb = pd.DataFrame([{
+        "信号日": x["date"], "确认日": x.get("confirm_date") or "待确认",
+        "类型": x["type"], "入场参考价": x.get("entry_ref_price"),
+        "可交易": "是" if x["is_tradable"] else "否",
+        "主信号": "★" if x.get("is_primary") else "",
+        "过滤": x.get("filter_codes") or "通过",
+        "理由": x.get("reason", ""),
+    } for x in sigs[::-1]])
+    st.dataframe(tb, width="stretch", hide_index=True)
+    st.caption("信号日 = 触发笔结束日；确认日 = 信号日 + 实测确认延迟"
+               "（缠论「笔」需后续 K 线确认，见 ADR-011，通常 1~2 个交易日）")
+else:
+    st.info("该股票在当前窗口内没有缠论买卖点信号。")
+
+# ==================== 回测统计 ====================
+st.subheader("回测统计参考")
+bt = res.get("backtest") or []
+if bt:
+    tb2 = pd.DataFrame([{
+        "类型": b["signal_type"], "窗口": f"{b['window']}日", "样本": b["n"],
+        "平均收益": f"{b['avg_return']:+.2%}", "胜率": f"{b['win_rate']:.1%}",
+        "平均最大回撤": f"{b['avg_mdd']:.2%}",
+    } for b in bt])
+    st.dataframe(tb2, width="stretch", hide_index=True)
+    st.caption("口径：入场 = 确认日次一交易日开盘；卖点收益已做方向调整"
+               "（价格下跌记为正）。样本少时不具解释力。")
+else:
+    st.info("无回测数据。")
+
+# ==================== 第 5 步：LLM 按需生成 ====================
+st.subheader("AI 总结")
+llm = res.get("llm") or {}
+has_text = bool(llm.get("text"))
+col_btn, col_info = st.columns([1, 4])
+if col_btn.button("生成 AI 总结", disabled=has_text, width="stretch"):
+    with st.spinner("调用 DeepSeek…"):
+        res["llm"] = generate_llm_summary(res)
+        st.session_state["res"] = res
+    llm = res["llm"]
+    has_text = bool(llm.get("text"))
+col_info.caption("规则结果无需 LLM 即可使用；AI 总结只做解释与归纳，失败会自动降级。")
+
+if has_text:
+    st.markdown(llm["text"])
+    st.caption(f"模型 {llm.get('model', '')} · token {llm.get('tokens', 0)}"
+               f" · 费用 ¥{llm.get('cost', 0):.6f} · 缓存 {'是' if llm.get('cached') else '否'}")
+elif llm.get("error"):
+    st.warning(f"生成失败，已降级为仅规则结果：{llm['error']}")
+else:
+    st.caption("尚未生成。")
+
+with st.expander("查看原始结构化数据（analyze_stock 的返回）"):
+    st.json(res, expanded=False)
+
+st.divider()
+st.caption("本页面由程序自动生成，非投资建议。")

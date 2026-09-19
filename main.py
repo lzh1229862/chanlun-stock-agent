@@ -90,6 +90,8 @@ def main():
     ap.add_argument("--nodes", default=None, help="只跑指定节点，逗号分隔（调试用）")
     ap.add_argument("--engine", choices=["auto", "native", "langgraph"], default="auto")
     ap.add_argument("--log-file", default=None, help="运行日志路径，默认 logs/<交易日>.json")
+    ap.add_argument("--analyze", default=None, metavar="CODE",
+                    help="只分析单只股票（调 analyzer.analyze_stock），不跑批量流程")
     ap.add_argument("--trading-day-only", action="store_true",
                     help="非交易日直接跳过（给 Windows 计划任务用）")
     a = ap.parse_args()
@@ -106,6 +108,33 @@ def main():
         if d not in set(trading_calendar()):
             print(f"{d.date()} 不是交易日（周末或节假日），跳过本次运行。")
             return 0
+
+    if a.analyze:
+        from analyzer import analyze_stock
+        r = analyze_stock(a.analyze, a.date, use_llm=not a.no_llm)
+        if not r.get("ok"):
+            print("分析失败:", r.get("error"))
+            return 1
+        k = r.get("kline") or {}
+        stt = r.get("structure") or {}
+        print(r["code"], r["name"], r["board"],
+              "涨跌幅限制 ±%.0f%%" % (r["limit_ratio"] * 100))
+        print("K线 %s 行  %s ~ %s  收盘 %s" % (k.get("rows"), k.get("start"),
+                                                k.get("end"), k.get("close_raw")))
+        print("结构 %s 分型 / %s 笔 / %s 中枢  位置 %s" % (stt.get("n_fx"), stt.get("n_bi"),
+                                                        stt.get("n_zs"), stt.get("position")))
+        print("信号 %s 条（可交易 %s / 主信号 %s）" % (len(r["signals"]),
+                                                     r["tradable_count"], r["primary_count"]))
+        for x in r["signals"][-5:]:
+            print("  %s %-12s 确认 %s  入场 %s  主信号 %s" % (
+                x["date"], x["type"], x["confirm_date"] or "待确认",
+                x["entry_ref_price"] or "-", x["is_primary"]))
+        llm = r.get("llm") or {}
+        if llm.get("text"):
+            print()
+            print("AI 总结（token %s，费用 ¥%.6f）:" % (llm["tokens"], llm["cost"]))
+            print(llm["text"])
+        return 0
 
     codes = parse_stocks(a.stocks)
     nodes = [n.strip() for n in a.nodes.split(",")] if a.nodes else None

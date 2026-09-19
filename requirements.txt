@@ -1,5 +1,5 @@
 # 缠论股票分析 Agent 顶层依赖
-# 完整环境快照见 env_backup/pip-freeze-after-langgraph.txt
+# 完整环境快照见 env_backup/pip-freeze-after-streamlit.txt
 # 安装：python -m pip install -r requirements.txt
 
 akshare==1.18.96
@@ -8,7 +8,9 @@ openai==3.15.0
 pandas==3.0.3
 pyarrow==25.0.1
 PyYAML==6.0.3
-langgraph==1.2.11
 requests==2.33.1
 numpy==2.4.6
 matplotlib==3.10.9
+langgraph==1.2.11
+streamlit==1.64.0
+plotly==7.1.0
