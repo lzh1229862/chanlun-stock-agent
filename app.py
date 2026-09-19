@@ -84,7 +84,9 @@ def render_pool_page():
                         help=f"每行一个，或用逗号/空格分隔；最多 {MAX_STOCKS} 只，6 位数字")
     codes = parse_codes(text)
     ok_codes, bad = validate_codes(codes)
-    too_many = len(ok_codes) > MAX_STOCKS
+    # 上限只约束用户自己设的池；仓库默认池是 12 只技术样本，原样不动就不拦，
+    # 否则一打开页面就报「最多 10 只」、两个按钮全灰，什么也干不了。
+    too_many = len(ok_codes) > MAX_STOCKS and ok_codes != pool
 
     if bad:
         st.error("这些不是有效代码：" + "、".join(f"`{c}`（{why}）" for c, why in bad))
@@ -93,6 +95,9 @@ def render_pool_page():
     if ok_codes and not bad and not too_many:
         if ok_codes == pool:
             st.caption(f"与当前池一致（{len(ok_codes)} 只），无需替换。")
+            if len(pool) > MAX_STOCKS and not custom:
+                st.caption(f"（仓库默认池是 {len(pool)} 只技术样本，超过 {MAX_STOCKS} 只上限；"
+                           f"原样不动就不拦。你自己设的池最多 {MAX_STOCKS} 只。）")
         else:
             st.caption(f"将替换为 {len(ok_codes)} 只：" + "、".join(ok_codes))
 
@@ -181,7 +186,10 @@ st.set_page_config(page_title="缠论分析 Agent", layout="wide")
 
 # ==================== 第 2 步：侧边栏（模式切换 + 查询 / 股票池）====================
 with st.sidebar:
-    mode = st.radio("模式", ["单股分析", "自选股与日报"], label_visibility="collapsed")
+    # ?page=pool 可直接打开「自选股与日报」，方便收藏 / 分享链接
+    _modes = ["单股分析", "自选股与日报"]
+    _idx = 1 if st.query_params.get("page") == "pool" else 0
+    mode = st.radio("模式", _modes, index=_idx, label_visibility="collapsed")
     st.divider()
 
     if mode == "单股分析":
