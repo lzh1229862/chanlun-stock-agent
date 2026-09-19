@@ -7,3 +7,16 @@ watchlist:
 # 报告输出
 report:
   output_dir: "reports"
+
+# 信号过滤（PRD F3）
+filter:
+  # F3.4 量能过滤（P2，可选）。enable=false 时以下三条全部不生效。
+  # 「成交量异常」有三种读法，各自独立可关：
+  #   停牌      成交量为 0，根本没法成交
+  #   流动性低  成交额低于下限，量太小、滑点大
+  #   放量异常  成交量远高于近期均量，常见于异动或停牌复牌
+  volume:
+    enable: false            # 总开关，默认关（P2 可选项）
+    exclude_suspended: true  # 信号日成交量为 0 -> 不可交易
+    min_amount: 10000000     # 信号日成交额下限（元）= 1000 万，低于视为流动性不足
+    max_volume_ratio: 10.0   # 信号日成交量 / 前 20 日均量 的上限，超过视为放量异常

@@ -23,6 +23,8 @@
 - **归档**：报告落 reports/YYYY-MM-DD/（report.md + signals.csv + meta.json），三日期写入 SQLite reports 表（ADR-013）
 - **编排**：agent_graph.py 线性 6 节点（fetch/validate/chan/filter/backtest/report）+ 4 条条件分支（B1~B4）；未用 langgraph，节点签名 state->dict 可直接接入
 - **入口**：main.py（PRD F7.3）支持 --date / --stocks / --no-llm / --nodes / --engine；运行日志落 logs/YYYY-MM-DD.json
+- **量能过滤**：F3.4 三条可选规则（susp/illiquid/volspike），默认关；配置在 config/settings.yaml
+- **定时任务**：scripts/install_schedule.bat 注册 ChanAgentDaily（周一至周五 18:05，非交易日自动跳过）
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
 
 ## 已知待办

@@ -34,6 +34,18 @@ from storage_kline import load_kline, parquet_path, ts_code
 from storage_signal import query_signals
 
 MIN_LISTED_TRADING_DAYS = 60
+
+SETTINGS_PATH = Path('config/settings.yaml')
+
+
+def load_filter_settings():
+    """读取 config/settings.yaml 的 filter 段（缺省返回空 dict，即全部走默认）。"""
+    try:
+        import yaml
+        cfg = yaml.safe_load(SETTINGS_PATH.read_text(encoding="utf-8")) or {}
+        return cfg.get("filter") or {}
+    except Exception:
+        return {}
 LIMIT_TOL = 0.005          # 判定「收盘价 = 涨跌停价」的容差（元）
 QUOTE_URL = "https://qt.gtimg.cn/q={}"
 
@@ -165,6 +177,7 @@ def build_context(code):
         "is_delisted": name_hit(name, EXTRA_EXCLUDE_KEYWORDS),
         "listing_date": fetch_listing_date(code),
         "calendar": trading_calendar(),
+        "volume": load_filter_settings().get("volume") or {},
     }
 
 
@@ -225,6 +238,30 @@ def filter_signals(code, signals, bars, context, min_days=MIN_LISTED_TRADING_DAY
                 reasons.append(f"当日跌停 {price:.2f}，卖不出")
                 codes.append("limitdown")
             detail["涨跌停"] = status or "无"
+        # --- F3.4 量能过滤（可选，config/settings.yaml 的 filter.volume.enable 控制）---
+        vcfg = context.get("volume") or {}
+        if vcfg.get("enable") and i is not None:
+            vol = float(bars.at[i, "volume"])
+            amt = float(bars.at[i, "amount"])
+            detail["成交量"] = vol
+            detail["成交额"] = amt
+            if vcfg.get("exclude_suspended", True) and vol <= 0:
+                reasons.append("信号日成交量为 0（停牌，无法成交）")
+                codes.append("susp")
+            lo = vcfg.get("min_amount")
+            if lo and amt < lo:
+                reasons.append(f"信号日成交额 {amt / 1e4:.0f} 万 < 下限 {lo / 1e4:.0f} 万")
+                codes.append("illiquid")
+            mr = vcfg.get("max_volume_ratio")
+            if mr:
+                prev = bars["volume"].iloc[max(0, i - 20):i]
+                avg = float(prev.mean()) if len(prev) else 0.0
+                if avg > 0:
+                    ratio = vol / avg
+                    detail["量比"] = round(ratio, 2)
+                    if ratio > mr:
+                        reasons.append(f"信号日成交量为前 20 日均量的 {ratio:.1f} 倍 > {mr}")
+                        codes.append("volspike")
 
         out.append({**s, "is_tradable": 0 if reasons else 1,
                     "filter_reason": "；".join(reasons),
@@ -306,6 +343,33 @@ def selftest():
     check("次新股 -> 不可交易", r_new[0]["is_tradable"], 0)
     check("次新股原因含次新股", "次新股" in r_new[0]["filter_reason"], True)
 
+    print("--- 6) 量能过滤（F3.4）---")
+    def mk(vols, amts):
+        import pandas as _pd
+        return _pd.DataFrame({"date": _pd.date_range("2026-01-01", periods=len(vols), freq="D"),
+                              "open": [100.0]*len(vols), "high": [100.0]*len(vols),
+                              "low": [100.0]*len(vols), "close": [100.0]*len(vols),
+                              "qfq_factor": [1.0]*len(vols),
+                              "volume": vols, "amount": amts})
+    one_buy = [{"date": "2026-01-01", "type": "第一类买点"}]
+    v_on = {**base_ctx, "volume": {"enable": True, "exclude_suspended": True,
+                                    "min_amount": 1.0e7, "max_volume_ratio": None}}
+    v_off = {**base_ctx, "volume": {"enable": False, "min_amount": 1.0e7}}
+    vb = mk([1000.0, 20000.0], [1.0e6, 5.0e6])
+    rv = filter_signals("600519", one_buy, vb, v_on)
+    check("成交额不足 -> 不可交易", rv[0]["is_tradable"], 0)
+    check("成交额不足 code=illiquid", rv[0]["filter_codes"], "illiquid")
+    rv2 = filter_signals("600519", one_buy, vb, v_off)
+    check("量能过滤关闭 -> 可交易", rv2[0]["is_tradable"], 1)
+    check("关闭时不写 volume detail", "成交量" in rv2[0]["detail"], False)
+    vb2 = mk([0.0, 100.0], [0.0, 1.0e8])
+    v_susp = {**base_ctx, "volume": {"enable": True, "exclude_suspended": True}}
+    check("停牌 -> code=susp", filter_signals("600519", one_buy, vb2, v_susp)[0]["filter_codes"], "susp")
+    check("停牌+成交额为0 -> 同时命中 susp 与 illiquid", filter_signals("600519", one_buy, vb2, v_on)[0]["filter_codes"], "susp+illiquid")
+    vb3 = mk([100.0]*20 + [5000.0], [1.0e8]*21)
+    v3 = {**base_ctx, "volume": {"enable": True, "max_volume_ratio": 10.0}}
+    late_buy = [{"date": "2026-01-21", "type": "第一类买点"}]
+    check("放量异常 -> code=volspike", filter_signals("600519", late_buy, vb3, v3)[0]["filter_codes"], "volspike")
     print(f"==> 自测 {sum(ok)}/{len(ok)} 通过" + ("" if all(ok) else "  ❌ 有失败项"))
     return all(ok)
 

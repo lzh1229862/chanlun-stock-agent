@@ -36,6 +36,9 @@ RULE_LEGEND = [
     ("new", f"次新股（上市不足 {MIN_LISTED_TRADING_DAYS} 个交易日）"),
     ("limitup", "买点当日涨停，买不进"),
     ("limitdown", "卖点当日跌停，卖不出"),
+    ("susp", "信号日停牌（成交量为 0）"),
+    ("illiquid", "成交额低于下限，流动性不足"),
+    ("volspike", "成交量异常放大"),
 ]
 LEGEND = dict(RULE_LEGEND)
 

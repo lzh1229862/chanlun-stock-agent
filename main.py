@@ -20,7 +20,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from agent_graph import PIPELINE, run_pipeline
@@ -90,11 +90,22 @@ def main():
     ap.add_argument("--nodes", default=None, help="只跑指定节点，逗号分隔（调试用）")
     ap.add_argument("--engine", choices=["auto", "native", "langgraph"], default="auto")
     ap.add_argument("--log-file", default=None, help="运行日志路径，默认 logs/<交易日>.json")
+    ap.add_argument("--trading-day-only", action="store_true",
+                    help="非交易日直接跳过（给 Windows 计划任务用）")
     a = ap.parse_args()
 
     if a.no_llm:
         import os
         os.environ.pop("DEEPSEEK_API_KEY", None)
+
+    if a.trading_day_only:
+        import pandas as pd
+
+        from signal_filter import trading_calendar
+        d = pd.Timestamp(a.date) if a.date else pd.Timestamp(date.today())
+        if d not in set(trading_calendar()):
+            print(f"{d.date()} 不是交易日（周末或节假日），跳过本次运行。")
+            return 0
 
     codes = parse_stocks(a.stocks)
     nodes = [n.strip() for n in a.nodes.split(",")] if a.nodes else None
