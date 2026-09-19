@@ -1,28 +1,38 @@
-"""T5-1 Markdown 报告构建（规则生成，暂不接 LLM）。
+"""T5-1 / T5-4 Markdown 报告构建（规则生成 + 可选 LLM 总结）。
 
 输出
     reports/YYYY-MM-DD/report.md
 
-重点（ADR-011 / ADR-012）
-    - 每个信号必须同时标注：信号日 signal_date / 确认日 confirm_date / 入场参考价 entry_ref_price
-    - 信号日 != 确认日时，显式提示「本信号为 X 个交易日前发出」，避免用户误以为是当日新信号
-    - confirm_date 为 NULL 表示「尚未确认」，报告标为待确认、不可操作
+LLM 调用策略（T5-4）
+    有信号 且 存在 is_tradable=1 的信号 -> 调用 LLM 生成「AI 总结」
+    无信号 或 无可交易信号              -> 只进股票池表格，不调 LLM
+    LLM 调用失败                        -> 降级为纯规则报告，报告照常生成
+    --no-llm                            -> 完全不调用
+
+报告结构区分
+    规则结论   由代码按固定规则生成（结构位置 / 最近信号 / 距今交易日）
+    AI 总结    由 DeepSeek 按 config/prompts/report_summary.txt 生成，可给出方向性判断
 
 运行
-    python report_builder.py                  # 生成今日报告
+    python report_builder.py                # 生成今日报告（含 LLM）
+    python report_builder.py --no-llm       # 只出规则报告
     python report_builder.py --date 2026-09-18
-    python report_builder.py --code 600519    # 只报指定股票
-    python report_builder.py --stdout         # 直接打印，不落盘
+    python report_builder.py --code 600519  # 只报指定股票（覆盖 watchlist）
+    python report_builder.py --stdout
 """
 import argparse
+import time
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
 import czsc
 import pandas as pd
+import yaml
 
 from confirm_dates import load_frames
+from llm_client import MODEL as LLM_MODEL
+from llm_client import summarize as llm_summarize
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_zs
 from signal_filter import fetch_name, trading_calendar
 from storage_signal import query_signals
@@ -31,6 +41,7 @@ from storage_signal import query_signals
 
 REPORT_TITLE = "缠论分析日报"
 OUTPUT_DIR = Path("reports")
+SETTINGS_PATH = Path("config/settings.yaml")
 
 DISCLAIMER = """
 > **非投资建议**：本报告由程序按缠论规则自动生成，仅是对价格结构的算法化描述，
@@ -62,6 +73,14 @@ def trading_days_between(cal, a, b):
     """(a, b] 之间的交易日数。"""
     a, b = pd.Timestamp(a), pd.Timestamp(b)
     return sum(1 for d in cal if a < d <= b)
+
+
+def load_watchlist():
+    """自选股池，来自 config/settings.yaml 的 watchlist。"""
+    if not SETTINGS_PATH.exists():
+        return []
+    cfg = yaml.safe_load(SETTINGS_PATH.read_text(encoding="utf-8")) or {}
+    return [str(c) for c in (cfg.get("watchlist") or [])]
 
 
 def filter_note(filter_version, is_tradable):
@@ -118,18 +137,31 @@ def stock_structure(code):
 
 # ==================== 各段落渲染 ====================
 
-def render_overview(report_date, stocks, all_, tradable, primary, pending):
+def render_overview(report_date, codes, all_, tradable, primary, pending):
     return "\n".join([
         "## 报告概览", "",
         "| 项 | 值 |", "| --- | --- |",
         f"| 报告日期 | {report_date} |",
-        f"| 股票池 | {'、'.join(stocks)}（{len(stocks)} 只）|",
+        f"| 股票池 | {'、'.join(codes)}（{len(codes)} 只）|",
         f"| 信号总数 | {len(all_)} |",
         f"| 可交易信号 | {len(tradable)} |",
         f"| 其中主信号 | {len(primary)} |",
         f"| 待确认信号 | {len(pending)} |",
         "",
     ])
+
+
+def render_watchlist_table(codes, by_code, names, llm_state):
+    L = ["## 股票池概览", "",
+         "| 代码 | 名称 | 信号数 | 可交易 | 主信号 | 本次 LLM |",
+         "| --- | --- | --- | --- | --- | --- |"]
+    for c in codes:
+        sigs = by_code.get(c, [])
+        tr = sum(1 for s in sigs if s["is_tradable"])
+        pr = sum(1 for s in sigs if s["is_primary"])
+        L.append(f"| {c} | {names.get(c, '')} | {len(sigs)} | {tr} | {pr} | {llm_state.get(c, '-')} |")
+    L.append("")
+    return "\n".join(L)
 
 
 def render_staleness_alert(report_date, all_, cal):
@@ -171,6 +203,18 @@ def render_structure(st):
         L.append(f"  | {b.sdt.date()} | {b.edt.date()} | {b.direction} | {num(b.low)} ~ {num(b.high)} |")
     L.append("")
     return "\n".join(L)
+
+
+def render_llm(llm):
+    """AI 总结段落。llm = {"state":..., "text":..., "tokens":..., "cost":..., "cached":...}"""
+    if llm and llm.get("text"):
+        u = llm.get("tokens", 0)
+        tag = "缓存命中" if llm.get("cached") else "本次调用"
+        return ("\n".join([f"**AI 总结**（{llm.get('model', LLM_MODEL)}，{tag}，"
+                            f"token {u}，费用 ¥{llm.get('cost', 0):.6f}）", "",
+                            llm["text"], ""]))
+    reason = (llm or {}).get("reason", "未调用")
+    return f"**AI 总结**：本次未调用（{reason}）\n"
 
 
 def render_signals(sigs, report_date, cal):
@@ -255,15 +299,12 @@ def one_line_conclusion(st, sigs, report_date, cal):
     return "；".join(parts) + "。"
 
 
-def render_stock(code, sigs, report_date, cal, bt_stats):
+def render_stock(code, name, sigs, report_date, cal, bt_stats, llm):
     st = stock_structure(code)
-    try:
-        name = fetch_name(code)
-    except Exception:
-        name = ""
     L = [f"### {code} {name}".rstrip(), "",
-         f"**一句话结论**：{one_line_conclusion(st, sigs, report_date, cal)}", ""]
-    L.append(render_structure(st))
+         f"**规则结论**：{one_line_conclusion(st, sigs, report_date, cal)}", "",
+         render_llm(llm),
+         render_structure(st)]
     if sigs:
         L.append(render_signals(sigs, report_date, cal))
         L.append(render_backtest_ref(sigs, bt_stats))
@@ -272,41 +313,95 @@ def render_stock(code, sigs, report_date, cal, bt_stats):
     return "\n".join(L)
 
 
-def render_footer():
-    return "\n".join([
-        "## 附录：口径说明", "",
-        "| 项 | 说明 |", "| --- | --- |",
-        "| 价格口径 | 报告中的价格均为**不复权**（盘面实际价）；结构段为前复权口径 |",
-        "| 信号日 | 触发笔结束日 = BI.edt = BI.fx_b.dt |",
-        "| 确认日 | 信号日 + 实测确认延迟（逐日放行 K 线重跑得出，ADR-011）|",
-        "| 入场参考价 | 确认日次一交易日不复权开盘价；与回测表 entry_price（前复权）口径不同 |",
-        "| 待确认 | confirm_date 为 NULL，表示当前数据不足以确认该信号，不可操作 |",
-        "| 过滤 | is_tradable，原因见 filter_version（如 v1_f3:limitup = 买点当日涨停）|",
-        "",
-        "---", "",
-        "*本报告由程序自动生成，非投资建议。*", "",
-    ])
+def render_footer(llm_stats):
+    L = ["## 附录：口径说明", "",
+         "| 项 | 说明 |", "| --- | --- |",
+         "| 价格口径 | 报告中的价格均为**不复权**（盘面实际价）；结构段为前复权口径 |",
+         "| 信号日 | 触发笔结束日 = BI.edt = BI.fx_b.dt |",
+         "| 确认日 | 信号日 + 实测确认延迟（逐日放行 K 线重跑得出，ADR-011）|",
+         "| 入场参考价 | 确认日次一交易日不复权开盘价；与回测表 entry_price（前复权）口径不同 |",
+         "| 待确认 | confirm_date 为 NULL，表示当前数据不足以确认该信号，不可操作 |",
+         "| 过滤 | is_tradable，原因见 filter_version（如 v1_f3:limitup = 买点当日涨停）|",
+         "| 规则结论 | 由代码按固定规则生成，不含模型判断 |",
+         "| AI 总结 | 由 DeepSeek 生成，可给方向性判断；失败时自动降级为纯规则报告 |",
+         ""]
+    if llm_stats:
+        L += ["### 本次 LLM 调用情况", "",
+              "| 项 | 值 |", "| --- | --- |",
+              f"| 调用 LLM 的股票数 | {llm_stats['called']} |",
+              f"| 跳过 LLM 的股票数 | {llm_stats['skipped']} |",
+              f"| 调用失败（已降级） | {llm_stats['failed']} |",
+              f"| 其中命中缓存 | {llm_stats['cached']} |",
+              f"| token 消耗 | {llm_stats['tokens']} |",
+              f"| 费用 | ¥{llm_stats['cost']:.6f} |",
+              f"| 模型 | {llm_stats['model']} |",
+              ""]
+        if llm_stats["skip_detail"]:
+            L.append("跳过原因：" + "；".join(f"{k} {v} 只" for k, v in llm_stats["skip_detail"].items()))
+            L.append("")
+    L += ["---", "", "*本报告由程序自动生成，非投资建议。*", ""]
+    return "\n".join(L)
+
+
+# ==================== LLM 输入组装 ====================
+
+def build_payload(code, name, sigs, st, bt_stats, report_date):
+    structure = None
+    if st:
+        structure = {
+            "last_date": st["last_date"], "close": round(st["close_raw"], 2),
+            "position": st["position"], "n_bi": st["n_bi"], "n_zs": st["n_zs"],
+            "zs": ({"sdt": str(st["zs"]["sdt"].date()), "edt": str(st["zs"]["edt"].date()),
+                    "zd": round(st["zs"]["zd"], 2), "zg": round(st["zs"]["zg"], 2)}
+                   if st["zs"] else None),
+            "bis": [{"sdt": str(b.sdt.date()), "edt": str(b.edt.date()),
+                     "direction": str(b.direction), "low": round(b.low, 2),
+                     "high": round(b.high, 2)} for b in st["bis"]],
+        }
+    types = {s["signal_type"] for s in sigs}
+    bt = [{"signal_type": t, "window": w, **v}
+          for (scope, w, t), v in sorted(bt_stats.items())
+          if scope == BACKTEST_SCOPE and t in types]
+    return {"stock_code": code, "stock_name": name, "report_date": report_date,
+            "structure": structure,
+            "signals": [{"signal_date": s["signal_date"], "confirm_date": s["confirm_date"],
+                         "entry_ref_price": s["entry_ref_price"], "signal_type": s["signal_type"],
+                         "is_tradable": s["is_tradable"], "is_primary": s["is_primary"],
+                         "filter_version": s["filter_version"],
+                         "signal_reason": s["signal_reason"]} for s in sigs],
+            "backtest": bt}
 
 
 # ==================== 主流程 ====================
 
-def build_report(report_date=None, codes=None):
+def build_report(report_date=None, codes=None, use_llm=True, verbose=True):
     from backtest import query_backtest
 
+    t0 = time.perf_counter()
     report_date = str(report_date or date.today())
     cal = trading_calendar()
 
+    watch = codes or load_watchlist()
     sigs_all = query_signals()
     if codes:
-        sigs_all = [s for s in sigs_all if s["stock_code"] in codes]
-    if not sigs_all:
-        return None, None
+        sigs_all = [s for s in sigs_all if s["stock_code"] in set(codes)]
 
     by_code = defaultdict(list)
     for s in sigs_all:
         by_code[s["stock_code"]].append(s)
     for v in by_code.values():
         v.sort(key=lambda x: x["signal_date"])
+
+    all_codes = sorted(set(watch) | set(by_code))
+    if not all_codes:
+        return None, None, None
+
+    names = {}
+    for c in all_codes:
+        try:
+            names[c] = fetch_name(c)
+        except Exception:
+            names[c] = ""
 
     agg = defaultdict(list)
     for r in query_backtest():
@@ -318,38 +413,110 @@ def build_report(report_date=None, codes=None):
                        "win_rate": sum(x["is_win"] for x in v) / len(v),
                        "avg_mdd": sum(x["max_drawdown"] for x in v) / len(v)}
 
-    tradable = [s for s in sigs_all if s["is_tradable"]]
-    primary = [s for s in sigs_all if s["is_primary"]]
-    pending = [s for s in sigs_all if not s["confirm_date"]]
+    # ---- 决定每只股票是否调 LLM，并执行 ----
+    stats = {"called": 0, "skipped": 0, "failed": 0, "cached": 0, "tokens": 0, "cost": 0.0,
+             "model": LLM_MODEL, "skip_detail": defaultdict(int)}
+    llm_by_code, state_by_code = {}, {}
+
+    for c in all_codes:
+        sigs = by_code.get(c, [])
+        tradable = [s for s in sigs if s["is_tradable"]]
+        if not use_llm:
+            llm_by_code[c] = {"reason": "已用 --no-llm 关闭"}
+            state_by_code[c] = "跳过（--no-llm）"
+            stats["skipped"] += 1
+            stats["skip_detail"]["--no-llm"] += 1
+            continue
+        if not sigs:
+            llm_by_code[c] = {"reason": "无信号"}
+            state_by_code[c] = "跳过（无信号）"
+            stats["skipped"] += 1
+            stats["skip_detail"]["无信号"] += 1
+            continue
+        if not tradable:
+            llm_by_code[c] = {"reason": "有信号但无可交易信号"}
+            state_by_code[c] = "跳过（无可交易信号）"
+            stats["skipped"] += 1
+            stats["skip_detail"]["无可交易信号"] += 1
+            continue
+
+        st = stock_structure(c)
+        payload = build_payload(c, names[c], sigs, st, bt_stats, report_date)
+        try:
+            r = llm_summarize(payload, verbose=False)
+            llm_by_code[c] = {"text": r["text"], "tokens": (r["usage"] or {}).get("total_tokens", 0),
+                              "cost": r["cost"], "cached": r["cached"], "model": r["model"]}
+            state_by_code[c] = "✅ 命中缓存" if r["cached"] else "✅ 已调用"
+            stats["called"] += 1
+            stats["cached"] += 1 if r["cached"] else 0
+            stats["tokens"] += (r["usage"] or {}).get("total_tokens", 0)
+            stats["cost"] += r["cost"] or 0
+        except Exception as e:
+            llm_by_code[c] = {"reason": f"调用失败（{type(e).__name__}），已降级为纯规则报告"}
+            state_by_code[c] = "❌ 失败（已降级）"
+            stats["failed"] += 1
+            stats["skipped"] += 0
+            if verbose:
+                print(f"  ⚠️ {c} LLM 调用失败: {type(e).__name__}: {str(e)[:100]}")
+
+    # ---- 渲染 ----
+    tradable_all = [s for s in sigs_all if s["is_tradable"]]
+    primary_all = [s for s in sigs_all if s["is_primary"]]
+    pending_all = [s for s in sigs_all if not s["confirm_date"]]
 
     parts = [f"# {REPORT_TITLE}  {report_date}", "", DISCLAIMER, "", "---", "",
-             render_overview(report_date, sorted(by_code), sigs_all, tradable, primary, pending),
-             "---", "", render_staleness_alert(report_date, sigs_all, cal),
+             render_overview(report_date, all_codes, sigs_all, tradable_all, primary_all, pending_all),
+             "---", "",
+             render_watchlist_table(all_codes, by_code, names, state_by_code),
+             "---", "",
+             render_staleness_alert(report_date, sigs_all, cal),
              "---", "", "## 个股分析", ""]
-    for code in sorted(by_code):
-        parts += [render_stock(code, by_code[code], report_date, cal, bt_stats), "---", ""]
-    parts.append(render_footer())
-    return "\n".join(parts), OUTPUT_DIR / report_date / "report.md"
+    for c in all_codes:
+        if not by_code.get(c):
+            parts += [f"### {c} {names.get(c, '')}".rstrip(), "",
+                      "**规则结论**：库中暂无该股信号，本次不做结构解读。", "",
+                      render_llm(llm_by_code.get(c)), "---", ""]
+            continue
+        parts += [render_stock(c, names.get(c, ""), by_code[c], report_date, cal, bt_stats,
+                               llm_by_code.get(c)), "---", ""]
+    parts.append(render_footer(stats))
+
+    md = "\n".join(parts)
+    stats["seconds"] = round(time.perf_counter() - t0, 2)
+    return md, OUTPUT_DIR / report_date / "report.md", stats
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=None)
     ap.add_argument("--code", action="append", default=None)
+    ap.add_argument("--no-llm", action="store_true")
     ap.add_argument("--stdout", action="store_true")
     a = ap.parse_args()
 
-    md, out = build_report(a.date, a.code)
+    md, out, stats = build_report(a.date, a.code, use_llm=not a.no_llm)
     if md is None:
-        print("库中无信号，先生成信号（python run_round3.py）")
+        print("股票池为空且库中无信号。请检查 config/settings.yaml 的 watchlist，或先跑 run_round3.py")
         return
     if a.stdout:
         print(md)
         return
+
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(md, encoding="utf-8")
     print(f"报告已生成: {out.resolve()}")
-    print(f"  字符数 {len(md)}   行数 {md.count(chr(10)) + 1}")
+    print(f"  字符数 {len(md)}   行数 {md.count(chr(10)) + 1}   耗时 {stats['seconds']}s")
+    print()
+    print("=== LLM 调用统计 ===")
+    print(f"  调用 LLM 的股票数 : {stats['called']}")
+    print(f"  跳过 LLM 的股票数 : {stats['skipped']}"
+          + (f"   （{'；'.join(f'{k} {v} 只' for k, v in stats['skip_detail'].items())}）"
+             if stats["skip_detail"] else ""))
+    print(f"  调用失败（已降级）: {stats['failed']}")
+    print(f"  其中命中缓存      : {stats['cached']}")
+    print(f"  token 消耗        : {stats['tokens']}")
+    print(f"  费用              : ¥{stats['cost']:.6f}")
+    print(f"  模型              : {stats['model']}")
 
 
 if __name__ == "__main__":

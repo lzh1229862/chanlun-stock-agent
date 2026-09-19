@@ -1,0 +1,9 @@
+# 缠论股票分析 Agent 配置（见 docs/PRD.md 第 7 节）
+
+# 自选股（股票池）。报告对池内每只股票出一行：无信号的只进表格、不调 LLM。
+watchlist:
+  - "600519"
+
+# 报告输出
+report:
+  output_dir: "reports"
