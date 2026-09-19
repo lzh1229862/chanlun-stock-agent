@@ -20,6 +20,7 @@
 - **三日期**：signals 表已加 confirm_date / entry_ref_price / backfill_note，历史 16 条已回填（ADR-012）
 - **报告**：report_builder.py 生成 reports/YYYY-MM-DD/report.md（规则生成；三日期+时效提示+过滤说明+回测参考；未接 LLM）
 - **LLM**：report_builder 已接入 DeepSeek（仅对有可交易信号的股票调用；失败降级为纯规则报告；--no-llm 可关闭）；提示词在 config/prompts/report_summary.txt
+- **归档**：报告落 reports/YYYY-MM-DD/（report.md + signals.csv + meta.json），三日期写入 SQLite reports 表（ADR-013）
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
 
 ## 已知待办

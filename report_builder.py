@@ -473,18 +473,21 @@ def build_report(report_date=None, codes=None, use_llm=True, verbose=True):
              "---", "",
              render_staleness_alert(report_date, sigs_all, cal),
              "---", "", "## 个股分析", ""]
+    sections = {}
     for c in all_codes:
         if not by_code.get(c):
-            parts += [f"### {c} {names.get(c, '')}".rstrip(), "",
-                      "**规则结论**：库中暂无该股信号，本次不做结构解读。", "",
-                      render_llm(llm_by_code.get(c)), "---", ""]
-            continue
-        parts += [render_stock(c, names.get(c, ""), by_code[c], report_date, cal, bt_stats,
-                               llm_by_code.get(c)), "---", ""]
+            sections[c] = "\n".join([f"### {c} {names.get(c, '')}".rstrip(), "",
+                                     "**规则结论**：库中暂无该股信号，本次不做结构解读。", "",
+                                     render_llm(llm_by_code.get(c))])
+        else:
+            sections[c] = render_stock(c, names.get(c, ""), by_code[c], report_date, cal,
+                                       bt_stats, llm_by_code.get(c))
+    for c in all_codes:
+        parts += [sections[c], "---", ""]
     parts.append(render_footer(stats))
 
     md = "\n".join(parts)
-    stats["seconds"] = round(time.perf_counter() - t0, 2)
+    stats.update({"seconds": round(time.perf_counter() - t0, 2), "report_date": report_date, "codes": all_codes, "sections": sections, "by_code": dict(by_code), "llm_by_code": llm_by_code})
     return md, OUTPUT_DIR / report_date / "report.md", stats
 
 
@@ -504,9 +507,10 @@ def main():
         print(md)
         return
 
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(md, encoding="utf-8")
-    print(f"报告已生成: {out.resolve()}")
+    from storage_report import archive_report
+    archive_dir = archive_report(stats["report_date"], md, stats)
+    print(f"归档目录: {archive_dir.resolve()}")
+    print("  包含 report.md / signals.csv / meta.json")
     print(f"  字符数 {len(md)}   行数 {md.count(chr(10)) + 1}   耗时 {stats['seconds']}s")
     print()
     print("=== LLM 调用统计 ===")
