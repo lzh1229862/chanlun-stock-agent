@@ -376,7 +376,8 @@ def build_payload(code, name, sigs, st, bt_stats, report_date):
 
 # ==================== 主流程 ====================
 
-def build_report(report_date=None, codes=None, use_llm=True, verbose=True):
+def build_report(report_date=None, codes=None, use_llm=True, verbose=True,
+                 llm_off_reason='已用 --no-llm 关闭'):
     from backtest import query_backtest
 
     t0 = time.perf_counter()
@@ -424,7 +425,7 @@ def build_report(report_date=None, codes=None, use_llm=True, verbose=True):
         sigs = by_code.get(c, [])
         tradable = [s for s in sigs if s["is_tradable"]]
         if not use_llm:
-            llm_by_code[c] = {"reason": "已用 --no-llm 关闭"}
+            llm_by_code[c] = {"reason": llm_off_reason}
             state_by_code[c] = "跳过（--no-llm）"
             stats["skipped"] += 1
             stats["skip_detail"]["--no-llm"] += 1

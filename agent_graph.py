@@ -1,12 +1,11 @@
-"""T6-1 / T6-2 主流程编排：线性 6 节点 + 4 条条件分支。
+"""T6-1 / T6-2 / T6-3 主流程编排：线性 6 节点 + 4 条条件分支 + 双执行引擎。
 
 设计要点
     - 每个节点是普通函数 node_xxx(state) -> dict（返回增量字典），**不依赖图运行时**，
       所以可以脱离编排单独调用调试。
-    - 未使用 langgraph（本机未安装）。节点签名与状态结构已按 LangGraph 的习惯设计，
-      将来装上后只需把 PIPELINE 接到 StateGraph 上，节点函数原样复用。
-    - 列表型状态键（errors / node_log / branch_log）按追加语义合并（等价于 LangGraph 的
-      的 Annotated reducer）。
+    - 双引擎：native（手写顺序执行）/ langgraph（StateGraph）。节点函数完全共用。
+      state 里列表型键（errors / node_log / branch_log）在两边都是追加语义：
+      native 用 merge()，langgraph 用 Annotated[list, operator.add]。
 
 条件分支（T6-2）
     B1 数据校验失败      -> 该股票退出 active_codes，记 errors，不阻塞整体
@@ -15,21 +14,25 @@
     B4 库中无历史信号    -> 跳过回测，并在报告里注明
 
 运行
-    python agent_graph.py                     # 默认按 config/settings.yaml 的 watchlist 跑
+    python agent_graph.py                  # 默认按 config/settings.yaml 的 watchlist 跑
     python agent_graph.py --date 2026-09-19
     python agent_graph.py --code 600519 --code 000001
     python agent_graph.py --no-llm
+    python agent_graph.py --nodes fetch,chan          # 只跑部分节点（调试）
+    python agent_graph.py --engine native|langgraph
 
 单节点调试（不跑全图）
-    from agent_graph import new_state, node_fetch, node_chan
+    from agent_graph import new_state, merge, node_fetch, node_chan
     st = new_state("2026-09-19", ["600519"])
     st = merge(st, node_fetch(st))
     st = merge(st, node_chan(st))
     print(st["signals"]["600519"][:2])
 """
 import argparse
+import operator
 import time
 from datetime import date, datetime, timedelta
+from typing import Annotated, TypedDict
 
 import pandas as pd
 
@@ -56,6 +59,24 @@ PIPELINE = ["fetch", "validate", "chan", "filter", "backtest", "report"]
 
 # ==================== 状态 ====================
 
+class AgentState(TypedDict, total=False):
+    """LangGraph 状态模式。列表型键用 operator.add 归约（追加语义）。"""
+    trade_date: str
+    stock_pool: list
+    active_codes: list
+    kline_data: dict
+    signals: dict
+    tradable_signals: dict
+    backtest_result: dict
+    llm_plan: dict
+    report_content: str
+    llm_summary: dict
+    archive_dir: str
+    errors: Annotated[list, operator.add]
+    node_log: Annotated[list, operator.add]
+    branch_log: Annotated[list, operator.add]
+
+
 def new_state(trade_date=None, stock_pool=None):
     """构造初始 state。stock_pool 为空时读 config/settings.yaml 的 watchlist。"""
     if not stock_pool:
@@ -73,7 +94,7 @@ def new_state(trade_date=None, stock_pool=None):
 
 
 def merge(state, delta):
-    """把节点返回的增量字典合并进 state；列表键按追加语义。"""
+    """把节点返回的增量字典合并进 state；列表键按追加语义（等价 langgraph 的 reducer）。"""
     out = dict(state)
     for k, v in (delta or {}).items():
         if k in APPEND_KEYS and isinstance(v, list):
@@ -121,6 +142,7 @@ def cond_has_tradable(state, code):
 def cond_llm_available(state):
     """B3 前置：LLM 是否可用（key 是否就绪）。返回 (可用?, 原因)。"""
     import os
+
     from llm_client import API_KEY_ENV
     if not os.getenv(API_KEY_ENV):
         return False, f"环境变量 {API_KEY_ENV} 未设置"
@@ -150,7 +172,7 @@ def cond_has_signals(state):
     return False, "全部股票均无结构信号"
 
 
-# ==================== 校验实现（F1.5，本轮新写） ====================
+# ==================== 校验实现（F1.5） ====================
 
 def validate_one(code, bars, trade_date, cal):
     """返回 (valid, issues, info)。"""
@@ -198,7 +220,8 @@ def node_fetch(state):
             kd[code] = {"fetched": st.get("fetched", 0), "local": st.get("local", 0),
                         "skipped": st.get("skipped", False)}
             logs.append(_log("fetch", f"{code}  拉取 {st.get('fetched', 0)} 行 / "
-                                       f"本地已有 {st.get('local', 0)} 行", time.perf_counter() - t0))
+                                       f"本地已有 {st.get('local', 0)} 行",
+                             time.perf_counter() - t0))
         except Exception as e:
             kd[code] = {"fetched": 0, "local": 0, "error": f"{type(e).__name__}: {e}"}
             logs.append(_log("fetch", f"{code}  失败 {type(e).__name__}: {str(e)[:60]}",
@@ -218,9 +241,9 @@ def node_validate(state):
         bars = load_kline(code)
         ok, issues, info = validate_one(code, bars, state["trade_date"], cal)
         kd[code] = {**kd.get(code, {}), **info, "valid": ok, "issues": issues}
-        logs.append(_log("validate", f"{code}  rows={info.get('rows', 0)} 缺失={info.get('missing', 0)} "
-                                      f"异常={info.get('abnormal', 0)} valid={ok}",
-                         time.perf_counter() - t0))
+        logs.append(_log("validate", f"{code}  rows={info.get('rows', 0)} "
+                                      f"缺失={info.get('missing', 0)} 异常={info.get('abnormal', 0)} "
+                                      f"valid={ok}", time.perf_counter() - t0))
         pass_, reason = cond_validate({"kline_data": kd}, code)
         if pass_:
             active.append(code)
@@ -254,7 +277,8 @@ def node_chan(state):
         recs = build_signals(bis, zss)
         sigs[code] = recs
         logs.append(_log("chan", f"{code}  分型 {len(list(cz.fx_list))} / 笔 {len(bis)} / "
-                                  f"中枢 {len(zss)}  信号 {len(recs)} 条", time.perf_counter() - t0))
+                                  f"中枢 {len(zss)}  信号 {len(recs)} 条",
+                         time.perf_counter() - t0))
     return {"signals": sigs, "node_log": logs}
 
 
@@ -289,7 +313,8 @@ def node_filter(state):
                              time.perf_counter() - t0))
             ok, reason = cond_has_tradable({"tradable_signals": tradable}, code)
             if not ok:
-                branches.append(_branch("filter", code, "B2 无可交易信号", "跳过 LLM（仅进表格）", reason))
+                branches.append(_branch("filter", code, "B2 无可交易信号",
+                                        "跳过 LLM（仅进表格）", reason))
         except Exception as e:
             tradable[code] = []
             errors.append({"node": "filter", "code": code, "error": f"{type(e).__name__}: {e}",
@@ -330,30 +355,30 @@ def node_report(state):
     codes = state["active_codes"]
     branches, logs = [], []
 
-    # B2 节点级：全池是否至少需要一次 LLM
     need = {c: cond_has_tradable(state, c) for c in codes}
     any_need = any(v[0] for v in need.values())
     llm_plan = {c: v[0] for c, v in need.items()}
 
-    # B3 前置：key 是否就绪
     llm_ok, llm_reason = cond_llm_available(state)
 
     use_llm = bool(codes) and any_need and llm_ok
     if not any_need:
+        off_reason = "全池无可交易信号"
         branches.append(_branch("report", "全局", "B2 无可交易信号", "跳过 LLM，只出规则报告",
-                                "全池 " + str(len(codes)) + " 只股票均无可交易信号"))
+                                f"全池 {len(codes)} 只股票均无可交易信号"))
     elif not llm_ok:
+        off_reason = f"LLM 不可用：{llm_reason}"
         branches.append(_branch("report", "全局", "B3 LLM 可用性", "降级为纯规则报告", llm_reason))
+    else:
+        off_reason = "已用 --no-llm 关闭"
 
     md, out, stats = build_report(state["trade_date"], codes or None,
-                                  use_llm=use_llm, verbose=False)
+                                  use_llm=use_llm, llm_off_reason=off_reason, verbose=False)
 
-    # B3 后置：逐股失败已在 build_report 内部降级，这里做决策日志
     failed, fail_reason = cond_llm_failed(stats)
     if failed:
         branches.append(_branch("report", "全局", "B3 LLM 调用结果", "降级为纯规则报告", fail_reason))
 
-    # B4 落地：回测跳过时在报告里注明
     notes = [b for b in (state.get("branch_log") or []) if b["condition"].startswith(("B1", "B4"))]
     if notes or branches:
         md = _append_branch_section(md, state, branches, notes)
@@ -364,8 +389,9 @@ def node_report(state):
                                f"失败 {stats.get('failed', 0)} / token {stats.get('tokens', 0)} / "
                                f"¥{stats.get('cost', 0):.6f}  归档 {out.parent}",
                      time.perf_counter() - t0))
-    return {"report_content": md, "llm_summary": {c: (v or {}).get("text", "")
-                                                  for c, v in (stats.get("llm_by_code") or {}).items()},
+    return {"report_content": md,
+            "llm_summary": {c: (v or {}).get("text", "")
+                            for c, v in (stats.get("llm_by_code") or {}).items()},
             "archive_dir": str(out.parent), "llm_plan": llm_plan,
             "branch_log": branches, "node_log": logs}
 
@@ -376,7 +402,8 @@ def _append_branch_section(md, state, later_branches, earlier_branches):
     lines = ["", "---", "", "## 本次运行分支说明", "",
              "| 环节 | 对象 | 条件 | 决策 | 原因 |", "| --- | --- | --- | --- | --- |"]
     for b in rows:
-        lines.append(f"| {b['node']} | {b['subject']} | {b['condition']} | {b['decision']} | {b['reason']} |")
+        lines.append(f"| {b['node']} | {b['subject']} | {b['condition']} | "
+                     f"{b['decision']} | {b['reason']} |")
     bt = state.get("backtest_result") or {}
     if bt.get("skipped"):
         lines += ["", f"> 回测已跳过：{bt.get('reason')}。上方「回测统计参考」为空表属预期。"]
@@ -395,20 +422,54 @@ NODE_FUNCS = {"fetch": node_fetch, "validate": node_validate, "chan": node_chan,
               "filter": node_filter, "backtest": node_backtest, "report": node_report}
 
 
-def run_pipeline(state=None, nodes=None, trade_date=None, stock_pool=None, verbose=True):
-    """线性跑完（或只跑 nodes 指定的子集）。返回最终 state。"""
+def build_langgraph():
+    """把同样的 6 个节点接到 LangGraph StateGraph 上（需 pip install langgraph）。"""
+    from langgraph.graph import END, START, StateGraph
+
+    g = StateGraph(AgentState)
+    for name in PIPELINE:
+        g.add_node(name, NODE_FUNCS[name])
+    g.add_edge(START, PIPELINE[0])
+    for a, b in zip(PIPELINE, PIPELINE[1:]):
+        g.add_edge(a, b)
+    g.add_edge(PIPELINE[-1], END)
+    return g.compile()
+
+
+def _summary(state, verbose):
+    if verbose:
+        print()
+        print(f"=== 完成：节点日志 {len(state['node_log'])} 条 / 分支决策 "
+              f"{len(state['branch_log'])} 条 / 告警 {len(state['errors'])} 条 ===")
+
+
+def run_pipeline(state=None, nodes=None, trade_date=None, stock_pool=None, verbose=True,
+                 engine="auto"):
+    """线性跑完（或只跑 nodes 指定的子集）。engine: auto / native / langgraph。"""
     state = state or new_state(trade_date, stock_pool)
     todo = [n for n in PIPELINE if not nodes or n in nodes]
     if verbose:
         print(f"=== 主流程编排  交易日 {state['trade_date']}  股票池 {state['stock_pool']} ===")
         print(f"    执行节点：{' -> '.join(todo)}")
         print()
+
+    if engine in ("auto", "langgraph") and not nodes:
+        try:
+            app = build_langgraph()
+            if verbose:
+                print("    执行引擎：LangGraph StateGraph")
+            state = dict(app.invoke(state))
+            _summary(state, verbose)
+            return state
+        except Exception as e:
+            if engine == "langgraph":
+                raise
+            if verbose:
+                print(f"    (langgraph 不可用，回退原生执行：{type(e).__name__}: {str(e)[:80]})")
+
     for name in todo:
         state = merge(state, NODE_FUNCS[name](state))
-    if verbose:
-        print()
-        print(f"=== 完成：节点日志 {len(state['node_log'])} 条 / 分支决策 "
-              f"{len(state['branch_log'])} 条 / 告警 {len(state['errors'])} 条 ===")
+    _summary(state, verbose)
     return state
 
 
@@ -418,6 +479,7 @@ def main():
     ap.add_argument("--code", action="append", default=None)
     ap.add_argument("--nodes", default=None, help="只跑指定节点，逗号分隔，如 fetch,chan")
     ap.add_argument("--no-llm", action="store_true")
+    ap.add_argument("--engine", choices=["auto", "native", "langgraph"], default="auto")
     a = ap.parse_args()
 
     if a.no_llm:
@@ -425,13 +487,14 @@ def main():
         os.environ.pop("DEEPSEEK_API_KEY", None)   # 走 B3「LLM 不可用」分支
 
     st = run_pipeline(trade_date=a.date, stock_pool=a.code,
-                      nodes=a.nodes.split(",") if a.nodes else None)
+                      nodes=a.nodes.split(",") if a.nodes else None, engine=a.engine)
 
     print()
     print("=== 分支决策汇总 ===")
     if st["branch_log"]:
         for b in st["branch_log"]:
-            print(f"  [{b['node']}] {b['condition']}  {b['subject']}  ->  {b['decision']}（{b['reason']}）")
+            print(f"  [{b['node']}] {b['condition']}  {b['subject']}  ->  "
+                  f"{b['decision']}（{b['reason']}）")
     else:
         print("  （本次没有触发任何分支，全部走主干）")
     print()
