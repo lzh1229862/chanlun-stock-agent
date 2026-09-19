@@ -32,7 +32,9 @@
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
 - **数据兜底**（T7-1b / ADR-015）：`analyzer.ensure_kline` 统一取数 —— 本地最新则走缓存（0 次网络请求）、缺失或过期则自动增量拉取、失败则返回结构化错误不抛异常；
   `analyze_stock` / `load_from_db` 结果新增 `data_source`（cache / fetched / None）与 `data_error`；
-  验收脚本 `verify_fallback.py`（22 项断言，`--offline` 可跳过联网用例）
+  验收脚本 `verify_fallback.py`（22 项断言，`--offline` 可跳过联网用例）；`analyze_stock` 改为永不抛异常（薄包装 + `_analyze_impl`）
+- **CI**：`.github/workflows/ci.yml`（GitHub Actions，ubuntu-latest + Python 3.12）—— 装依赖 → `compileall` 语法检查 → 离线单测；
+  `tests/test_offline.py` 12 项断言、0.3 秒、不联网（所有出网口打桩），README 顶部挂 CI 徽章
 
 ## 已知待办
 

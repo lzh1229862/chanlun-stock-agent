@@ -1,5 +1,8 @@
 # 缠论股票分析 Agent
 
+[![CI](https://github.com/lzh1229862/chanlun-stock-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lzh1229862/chanlun-stock-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 本地运行的 A 股缠论分析 Agent：自动获取日线 → 计算分型 / 笔 / 中枢 → 识别三类买卖点 → 信号过滤 → 轻量回测 → 生成中文报告（可选 LLM 总结）→ 归档为 Markdown / CSV / SQLite。另有 Streamlit 网页界面与 Windows 定时任务。
 
 > 本项目是**技术验证与学习用工具**：按缠论规则机械地生成结构化描述，不预测涨跌、不承诺收益、不含自动下单。
@@ -136,6 +139,8 @@ run_ui.bat
 ├── docs/
 │   ├── PRD.md             产品需求文档
 │   └── 技术决策记录.md      ADR-001 ~ ADR-015
+├── tests/                 离线单元测试（不联网，供 CI 用）
+├── .github/workflows/     GitHub Actions CI 配置
 ├── env_backup/            依赖快照（pip freeze）
 ├── data/                  行情 Parquet + SQLite（不进版本库）
 ├── reports/               归档报告（不进版本库）
@@ -211,6 +216,34 @@ python verify_fallback.py --offline   # 跳过需要联网的用例
 ```
 
 `verify_fallback.py` 会自己备份 → 删掉本地 Parquet → 调 `analyze_stock` → 检查是否自动拉回 → 模拟断网 → 最后还原原文件，跑完数据不会丢。
+
+除此之外还有一套**完全离线**的单元测试（不联网、不需要本地行情数据，0.3 秒跑完）：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+覆盖：
+
+| 测试类 | 断言内容 |
+| --- | --- |
+| `TestAnalyzeStockContract` | 返回字段齐全；缺数据时给结构化错误；`allow_fetch=False` 报对原因；**任何内部异常都被转成 `ok=False + error`，绝不抛出** |
+| `TestEnsureKline` | 无数据 + 无网络 → 返回 `(None, 原因)`；日历取不到 + 本地有数据 → 判 `cache` 不联网 |
+| `TestStorageKline` | Parquet 路径 / 代码前缀 / 缺失文件读成空表 |
+| `TestModulesImport` | 12 个业务模块全部可 import（挡语法错、循环依赖、依赖缺失） |
+
+---
+
+## 持续集成
+
+推送到 `main` 或提 PR 时自动跑 `.github/workflows/ci.yml`（ubuntu-latest + Python 3.12）：
+
+1. 按 `requirements.txt` 安装全部依赖（验证依赖可复现）
+2. `python -m compileall -q .` —— 全部 .py 语法检查
+3. `python -m unittest discover -s tests -v` —— 离线单元测试
+
+CI **不访问任何行情接口**：测试里把所有出网口都打了桩，所以不会因为第三方接口抖动而红。
+也正因为如此，CI 绿只代表「代码能装、能导入、契约没破」，**不代表策略有效**。
 
 ---
 

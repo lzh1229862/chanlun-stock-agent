@@ -101,11 +101,18 @@ def _payload(result):
 
 
 def _expected_last_trading_day(trade_date):
-    """返回 <= trade_date 的最后一个交易日（判断本地数据是否最新用）。"""
+    """返回 <= trade_date 的最后一个交易日（判断本地数据是否最新用）。
+
+    交易日历要联网取；取不到时返回 None 表示「无法判断」，由调用方决定怎么处理，
+    这里绝不向上抛异常（否则完全断网时 analyze_stock 会崩，违背 ADR-015）。
+    """
     import pandas as pd
 
-    from signal_filter import trading_calendar
-    prev = [d for d in trading_calendar() if d <= pd.Timestamp(trade_date)]
+    try:
+        from signal_filter import trading_calendar
+        prev = [d for d in trading_calendar() if d <= pd.Timestamp(trade_date)]
+    except Exception:
+        return None
     return prev[-1] if prev else None
 
 
@@ -122,7 +129,9 @@ def ensure_kline(code, trade_date, allow_fetch=True, years=2, verbose=False):
 
     df = load_kline(code)
     last_td = _expected_last_trading_day(trade_date)
-    if not df.empty and last_td is not None and df["date"].max() >= last_td:
+    # last_td 为 None = 交易日历取不到。此时本地有数据就直接用：
+    # 日历都取不到，网络多半也不通，再硬拉只会更慢，最后照样降级回缓存。
+    if not df.empty and (last_td is None or df["date"].max() >= last_td):
         return "cache", None
 
     if not allow_fetch:
@@ -157,10 +166,25 @@ def analyze_stock(code, date=None, use_llm=True, verbose=False, allow_fetch=True
     code      6 位股票代码
     date      交易日/报告日，默认今天
     use_llm   是否调用 DeepSeek（False 则 llm 字段为 None，可稍后用 generate_llm_summary 补）
+
+    本函数**绝不抛异常**：数据源不通、交易日历取不到、缠论库报错等任何内部失败，
+    都会转成 ok=False + error 的结构化结果返回（ADR-015）。
     """
     t0 = time.perf_counter()
     code = _norm_code(code)
     trade_date = str(date or _date.today())
+    try:
+        return _analyze_impl(code, trade_date, use_llm=use_llm, verbose=verbose,
+                             allow_fetch=allow_fetch)
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
+        return {"code": code, "trade_date": trade_date, "source": "live", "ok": False,
+                "error": f"分析过程异常（{msg}）", "elapsed": round(time.perf_counter() - t0, 2),
+                "data_source": None, "data_error": msg}
+
+
+def _analyze_impl(code, trade_date, use_llm=True, verbose=False, allow_fetch=True):
+    t0 = time.perf_counter()
     out = {"code": code, "trade_date": trade_date, "source": "live", "ok": False,
            "error": None, "elapsed": None,
            "data_source": None, "data_error": None}
