@@ -22,6 +22,7 @@
 - **LLM**：report_builder 已接入 DeepSeek（仅对有可交易信号的股票调用；失败降级为纯规则报告；--no-llm 可关闭）；提示词在 config/prompts/report_summary.txt
 - **归档**：报告落 reports/YYYY-MM-DD/（report.md + signals.csv + meta.json），三日期写入 SQLite reports 表（ADR-013）
 - **编排**：agent_graph.py 线性 6 节点（fetch/validate/chan/filter/backtest/report）+ 4 条条件分支（B1~B4）；未用 langgraph，节点签名 state->dict 可直接接入
+- **入口**：main.py（PRD F7.3）支持 --date / --stocks / --no-llm / --nodes / --engine；运行日志落 logs/YYYY-MM-DD.json
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
 
 ## 已知待办
