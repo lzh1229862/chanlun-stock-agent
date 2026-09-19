@@ -1,5 +1,5 @@
 # 缠论股票分析 Agent 顶层依赖
-# 完整环境快照见 env/pip-freeze-after-langgraph.txt
+# 完整环境快照见 env_backup/pip-freeze-after-langgraph.txt
 # 安装：python -m pip install -r requirements.txt
 
 akshare==1.18.96
