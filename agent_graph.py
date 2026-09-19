@@ -382,8 +382,8 @@ def node_report(state):
     notes = [b for b in (state.get("branch_log") or []) if b["condition"].startswith(("B1", "B4"))]
     if notes or branches:
         md = _append_branch_section(md, state, branches, notes)
-        stats["llm_by_code"] = stats.get("llm_by_code") or {}
-        archive_report(state["trade_date"], md, stats)
+    # 无论有没有分支都要归档：否则干净运行不会覆盖上一期的报告文件
+    archive_report(state["trade_date"], md, stats)
 
     logs.append(_log("report", f"LLM 调用 {stats.get('called', 0)} / 跳过 {stats.get('skipped', 0)} / "
                                f"失败 {stats.get('failed', 0)} / token {stats.get('tokens', 0)} / "
