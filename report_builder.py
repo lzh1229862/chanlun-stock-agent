@@ -214,6 +214,8 @@ def render_llm(llm):
                             f"token {u}，费用 ¥{llm.get('cost', 0):.6f}）", "",
                             llm["text"], ""]))
     reason = (llm or {}).get("reason", "未调用")
+    if reason.startswith("调用失败"):
+        return f"**AI 总结**：{reason}\n"
     return f"**AI 总结**：本次未调用（{reason}）\n"
 
 
