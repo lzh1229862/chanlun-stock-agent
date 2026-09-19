@@ -24,6 +24,7 @@
 import time
 from datetime import date as _date
 from datetime import datetime
+from datetime import timedelta
 
 import pandas as pd
 
@@ -32,7 +33,7 @@ from confirm_dates import confirm_entry, load_frames
 from mark_primary import decide_primary
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_signals, build_zs
 from signal_filter import board_of, build_context, fetch_name, filter_signals, limit_ratio
-from storage_kline import load_kline, parquet_path
+from storage_kline import load_kline, parquet_path, update_kline
 from storage_report import query_reports
 from storage_signal import query_signals
 
@@ -99,7 +100,58 @@ def _payload(result):
     }
 
 
-def analyze_stock(code, date=None, use_llm=True, verbose=False):
+def _expected_last_trading_day(trade_date):
+    """返回 <= trade_date 的最后一个交易日（判断本地数据是否最新用）。"""
+    import pandas as pd
+
+    from signal_filter import trading_calendar
+    prev = [d for d in trading_calendar() if d <= pd.Timestamp(trade_date)]
+    return prev[-1] if prev else None
+
+
+def ensure_kline(code, trade_date, allow_fetch=True, years=2, verbose=False):
+    """确保本地有该股 K 线且已更新到最新交易日（T7-1b 数据兜底）。
+
+    返回 (data_source, data_error)：
+        data_source = "cache"   本地已有且最新 -> 直接用，不拉取
+                    = "fetched" 本次执行了拉取 / 增量更新
+                    = None      本地无数据且拉取失败
+        data_error  = None，或失败原因字符串
+    """
+    import pandas as pd
+
+    df = load_kline(code)
+    last_td = _expected_last_trading_day(trade_date)
+    if not df.empty and last_td is not None and df["date"].max() >= last_td:
+        return "cache", None
+
+    if not allow_fetch:
+        if df.empty:
+            return None, "本地无数据且未开启自动拉取"
+        return "cache", None
+
+    end = pd.Timestamp(trade_date)
+    if df.empty:
+        start = (end - timedelta(days=365 * years)).date()
+    else:
+        start = df["date"].min().date()
+    try:
+        _, st = update_kline(code, start, end, verbose=False)
+    except Exception as e:
+        reason = f"{type(e).__name__}: {str(e)[:150]}"
+        if df.empty:
+            return None, f"自动拉取失败（{reason}）"
+        return "cache", f"增量更新失败，已用本地既有数据（{reason}）"
+
+    n_fetched = int(st.get("fetched", 0))
+    if verbose:
+        print(f"    [ensure_kline] {code} 拉取 {n_fetched} 行")
+    if load_kline(code).empty:
+        return None, "拉取后本地仍无数据（可能是无效代码或数据源不可用）"
+    return ("fetched" if n_fetched else "cache"), None
+
+
+def analyze_stock(code, date=None, use_llm=True, verbose=False, allow_fetch=True):
     """实时分析单只股票，返回结构化结果 dict。
 
     code      6 位股票代码
@@ -110,7 +162,8 @@ def analyze_stock(code, date=None, use_llm=True, verbose=False):
     code = _norm_code(code)
     trade_date = str(date or _date.today())
     out = {"code": code, "trade_date": trade_date, "source": "live", "ok": False,
-           "error": None, "elapsed": None}
+           "error": None, "elapsed": None,
+           "data_source": None, "data_error": None}
 
     try:
         name = fetch_name(code)
@@ -119,9 +172,19 @@ def analyze_stock(code, date=None, use_llm=True, verbose=False):
     out.update({"name": name, "board": board_of(code), "is_st": "ST" in name,
                 "limit_ratio": limit_ratio(code, "ST" in name)})
 
+    # --- T7-1b 数据兜底：本地无数据 / 不是最新 -> 自动拉取或增量更新 ---
+    data_source, data_error = ensure_kline(code, trade_date, allow_fetch=allow_fetch,
+                                           verbose=verbose)
+    out["data_source"], out["data_error"] = data_source, data_error
+    if data_source is None:
+        out["error"] = f"无法获取 K 线数据：{data_error}"
+        out["elapsed"] = round(time.perf_counter() - t0, 2)
+        return out
+
     raw, q = load_frames(code)
     if q.empty:
-        out["error"] = "本地无 K 线数据，请先跑一次 main.py 或 storage_kline.update_kline"
+        out["data_source"] = None
+        out["error"] = f"K 线数据为空（data_error={data_error}）"
         out["elapsed"] = round(time.perf_counter() - t0, 2)
         return out
 
@@ -226,7 +289,12 @@ def load_from_db(code, date=None):
         name = ""
     out = {"code": code, "trade_date": trade_date, "source": "history", "ok": True,
            "error": None, "name": name, "board": board_of(code), "is_st": "ST" in name,
-           "limit_ratio": limit_ratio(code, "ST" in name)}
+           "limit_ratio": limit_ratio(code, "ST" in name),
+           "data_source": None, "data_error": None}
+
+    # --- T7-1b 数据兜底（历史模式也保证有 K 线可看）---
+    data_source, data_error = ensure_kline(code, trade_date)
+    out["data_source"], out["data_error"] = data_source, data_error
 
     raw, q = load_frames(code)
     if not q.empty:
