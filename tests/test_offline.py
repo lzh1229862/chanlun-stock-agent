@@ -452,6 +452,16 @@ class TestVerifyEdge(unittest.TestCase):
     def test_stats_for_empty_is_none(self):
         self.assertIsNone(self.ve.stats_for([], 5, 0.002))
 
+    def test_welch_diff_ci_known_value(self):
+        d, lo, hi = self.ve.welch_diff_ci([1, 2, 3, 4, 5], [2, 3, 4, 5, 6])
+        self.assertAlmostEqual(d, -1.0, places=6)
+        self.assertAlmostEqual(lo, -3.3064, places=3)
+        self.assertAlmostEqual(hi, 1.3064, places=3)
+
+    def test_welch_diff_ci_needs_two_samples_each(self):
+        self.assertEqual(self.ve.welch_diff_ci([1], [2, 3]), (None, None, None))
+        self.assertEqual(self.ve.welch_diff_ci([1, 2], [3]), (None, None, None))
+
 
 class TestVerifyRobustness(unittest.TestCase):
     """参数敏感性 / 信号稳定性里的纯函数（离线）。
@@ -513,6 +523,88 @@ class TestVerifyRobustness(unittest.TestCase):
         for key, values, _ in self.vr.SWEEPS:
             self.assertIn(self.vr.BASELINE[key], values,
                           "%s 的扫描范围必须包含当前值，否则没法对照" % key)
+
+
+class TestVerifyLevel(unittest.TestCase):
+    """级别共振里的纯函数（离线）。重点是**防未来函数**那条边界。"""
+
+    def setUp(self):
+        import verify_level
+        self.vl = verify_level
+
+    @staticmethod
+    def _daily(n=10):
+        # 2026-01-05 是周一，10 个工作日正好两周
+        return pd.DataFrame({
+            "date": pd.bdate_range("2026-01-05", periods=n),
+            "open": list(range(1, n + 1)), "high": list(range(11, n + 11)),
+            "low": list(range(101, n + 111))[:n], "close": list(range(201, n + 201)),
+            "volume": [1] * n, "amount": [2] * n,
+        })
+
+    def test_week_start_is_monday(self):
+        self.assertEqual(str(self.vl.week_start("2026-01-05").date()), "2026-01-05")
+        self.assertEqual(str(self.vl.week_start("2026-01-07").date()), "2026-01-05")
+        self.assertEqual(str(self.vl.week_start("2026-01-11").date()), "2026-01-05")
+
+    def test_weekly_bars_uses_last_trading_day(self):
+        """周线的 date 必须是该周**最后一个真实交易日**，不是日历周五。"""
+        w = self.vl.weekly_bars(self._daily(10))
+        self.assertEqual(len(w), 2)
+        self.assertEqual(str(w["date"].iloc[0].date()), "2026-01-09")
+        self.assertEqual(str(w["date"].iloc[1].date()), "2026-01-16")
+        self.assertEqual(w["open"].iloc[0], 1)        # first
+        self.assertEqual(w["high"].iloc[0], 15)       # max of 11..15
+        self.assertEqual(w["low"].iloc[0], 101)       # min of 101..105
+        self.assertEqual(w["close"].iloc[0], 205)     # last of 201..205
+        self.assertEqual(w["volume"].iloc[0], 5)      # sum
+
+    def test_weekly_bars_handles_empty(self):
+        self.assertTrue(self.vl.weekly_bars(pd.DataFrame()).empty)
+
+    def test_weekly_index_never_sees_current_week(self):
+        """最关键的一条：不管信号日落在周几，取到的周线必须**严格早于本周一**。"""
+        w = self.vl.weekly_bars(self._daily(10))
+        checked = 0
+        for d in ["2026-01-05", "2026-01-07", "2026-01-09",
+                  "2026-01-12", "2026-01-14", "2026-01-16"]:
+            j = self.vl.weekly_index_for(w, d)
+            if j is None:
+                continue
+            checked += 1
+            self.assertLess(w["date"].iloc[j], self.vl.week_start(d),
+                            "%s 取到了当周或更晚的周线（未来函数）" % d)
+        self.assertGreater(checked, 0, "至少要有一个信号日能取到历史周线，否则这条没测到")
+
+    def test_weekly_index_none_when_no_history(self):
+        w = self.vl.weekly_bars(self._daily(5))          # 只有第 1 周
+        self.assertIsNone(self.vl.weekly_index_for(w, "2026-01-07"),
+                          "第 1 周内没有任何「已走完」的周线，必须返回 None")
+
+    def test_group_of_w1(self):
+        self.assertTrue(self.vl.group_of("W1 周线笔同向", {"bi_dir": "向上"}, 1))
+        self.assertFalse(self.vl.group_of("W1 周线笔同向", {"bi_dir": "向上"}, -1))
+        self.assertTrue(self.vl.group_of("W1 周线笔同向", {"bi_dir": "向下"}, -1))
+        self.assertIsNone(self.vl.group_of("W1 周线笔同向", {"bi_dir": None}, 1))
+
+    def test_group_of_w2_is_direction_symmetric(self):
+        above = {"close": 100.0, "zg": 90.0, "zd": 80.0}
+        self.assertTrue(self.vl.group_of("W2 周线中枢", above, 1))
+        self.assertFalse(self.vl.group_of("W2 周线中枢", above, -1))
+        below = {"close": 70.0, "zg": 90.0, "zd": 80.0}
+        self.assertFalse(self.vl.group_of("W2 周线中枢", below, 1))
+        self.assertTrue(self.vl.group_of("W2 周线中枢", below, -1))
+        self.assertIsNone(self.vl.group_of("W2 周线中枢", {"close": 100.0}, 1))
+
+    def test_group_of_w3(self):
+        st = {"close": 100.0, "ma20": 95.0}
+        self.assertTrue(self.vl.group_of("W3 周线MA20", st, 1))
+        self.assertFalse(self.vl.group_of("W3 周线MA20", st, -1))
+        self.assertIsNone(self.vl.group_of("W3 周线MA20", {"close": 100.0}, 1))
+
+    def test_group_of_unknown_condition_and_no_state(self):
+        self.assertIsNone(self.vl.group_of("W9 不存在", {"close": 1}, 1))
+        self.assertIsNone(self.vl.group_of("W1 周线笔同向", None, 1))
 
 
 class TestAppBoots(unittest.TestCase):

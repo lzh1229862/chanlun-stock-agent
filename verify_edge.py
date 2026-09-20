@@ -79,6 +79,26 @@ def wilson(k, n, z=1.96):
     return (c - s) / d, (c + s) / d
 
 
+def welch_diff_ci(a, b):
+    """两组均值之差的 95% 区间（Welch）。
+
+    分组对照必须看**差值**是否显著 —— 「配合组超额 +0.85%、不配合组 +0.40%」
+    听起来配合更好，但两个区间各自都很宽时，差值区间大概率跨 0，那就什么也没证明。
+    """
+    n1, n2 = len(a), len(b)
+    if n1 < 2 or n2 < 2:
+        return None, None, None
+    m1, m2 = mean(a), mean(b)
+    v1, v2 = stdev(a) ** 2, stdev(b) ** 2
+    se2 = v1 / n1 + v2 / n2
+    if se2 <= 0:
+        return m1 - m2, m1 - m2, m1 - m2
+    df = se2 * se2 / ((v1 / n1) ** 2 / (n1 - 1) + (v2 / n2) ** 2 / (n2 - 1))
+    d = m1 - m2
+    half = t_crit(int(max(df, 1.0))) * se2 ** 0.5
+    return d, d - half, d + half
+
+
 def profit_factor(vals):
     """盈亏比 = 盈利总和 / 亏损总和。无亏损返回 inf。"""
     up = sum(v for v in vals if v > 0)
