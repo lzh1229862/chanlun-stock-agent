@@ -27,7 +27,7 @@ from analyzer import (analyze_stock, ensure_kline, generate_llm_summary, load_fr
                       load_ohlc)
 from fundamentals import fmt_num, fmt_pct, fmt_yi, fmt_yi_plain
 from storage_kline import load_kline
-from structure_gap import GAP_THRESHOLD
+from structure_gap import GAP_THRESHOLD, label_of as gap_label
 from watchlist_store import (MAX_STOCKS, is_custom, load_default, load_watchlist,
                              parse_codes, reset_watchlist, save_watchlist, validate_codes)
 
@@ -150,6 +150,67 @@ def warm_up(codes):
                 pass
     bar.progress(1.0, text="完成")
     return warmed, failed, rows
+
+
+def render_scan_page():
+    """全市场买点（T18 / ADR-022）。只展示，不算回测/基本面/LLM；点一行跳单股分析。"""
+    import market_scan as mscan
+
+    st.title("全市场买点")
+    st.caption("扫全市场（沪深主板 / 创业板 / 科创板，排除北交所与 ST），**只挑买点**。"
+               "窗口按**确认日**算 —— 只放已经可确认的信号，未确认的不入选"
+               "（否则会出现「今天有、明天没了」）。")
+
+    rows, sd = mscan.query_scan()
+    if not rows:
+        st.info("还没有扫描结果。先跑一次 `python market_scan.py`"
+                "（可先 `--limit 50` 试跑；全市场首次约 4~5 小时，之后数据已缓存约 1 小时）。")
+        return
+
+    n_scan = len(mscan.done_codes(sd))
+    st.caption(f"扫描日 {sd} · 已扫 {n_scan} 只 · 原始命中 {len(rows)} 条")
+
+    all_types = sorted({r["signal_type"] for r in rows})
+    pref = [t for t in all_types if "第三类" in t] or all_types
+    c1, c2, c3 = st.columns([2, 2, 2])
+    types = c1.multiselect("买点类型", all_types, default=pref)
+    amts = [r["amount_yi"] or 0 for r in rows]
+    hi = float(round(max(amts) if amts else 1.0, 1))
+    min_amt = c2.slider("近 20 日日均成交额下限（亿）", 0.0, max(hi, 0.5),
+                        min(2.0, hi), 0.5)
+    drop_far = c3.checkbox(f"排除距中枢 ≥ {GAP_THRESHOLD} 日（H3）", value=True)
+
+    sel = [r for r in rows if r["signal_type"] in types
+           and (r["amount_yi"] or 0) >= min_amt
+           and (not drop_far
+                or (r["zs_gap_days"] if r["zs_gap_days"] is not None else -1) < GAP_THRESHOLD)]
+    st.caption(f"筛出 **{len(sel)}** 条（原始 {len(rows)} 条）")
+    if not sel:
+        st.info("当前筛选下没有结果，放宽一点试试。")
+        return
+
+    df = pd.DataFrame([{
+        "代码": r["stock_code"], "名称": r["stock_name"], "类型": r["signal_type"],
+        "信号日": r["signal_date"], "确认日": r["confirm_date"],
+        "距中枢": gap_label(r["zs_gap_days"]), "成交额(亿)": r["amount_yi"],
+    } for r in sel])
+    ev = st.dataframe(df, width="stretch", hide_index=True, on_select="rerun",
+                      selection_mode="single-row",
+                      height=min(600, 80 + 35 * min(len(df), 15)))
+    picked = []
+    try:
+        picked = list(ev.selection["rows"])
+    except Exception:
+        picked = []
+    if picked:
+        # 只写中间键；真正的模式切换在脚本顶部做（控件创建之前）
+        st.session_state["_jump_code"] = str(df.iloc[picked[0]]["代码"])
+        st.rerun()
+
+    st.caption("点一行 → 跳转单股分析。本页只放代码 / 名称 / 类型 / 日期 / 距中枢 / 成交额；"
+               "**不算回测、不抓基本面、不调 LLM** —— 那些点进去之后按需触发。")
+    st.caption("提示：全市场原始命中通常上千条，务必用上面三个条件收窄 —— "
+               "实测「成交额 ≥2 亿 + 排除 H3 远 + 只看三类买点」可压到约 70 只。")
 
 
 def render_pool_page():
@@ -292,18 +353,32 @@ st.set_page_config(page_title="缠论分析 Agent", layout="wide")
 # ==================== 皮肤：白天 / 夜晚 ====================
 html(skin.build_css())
 
+# 「从扫描页点进来」的跳转处理。
+# 必须在**控件创建之前**改它们的 state —— Streamlit 不允许在控件实例化后再改。
+# 所以扫描页只写中间键 _jump_code，这里在脚本顶部消费掉。
+_jump = st.session_state.pop("_jump_code", None)
+if _jump:
+    st.session_state["mode_radio"] = "单股分析"
+    st.session_state["code_input"] = str(_jump)
+    st.session_state["auto_run"] = True
+
 with st.sidebar:
     html('<div class="chx-brand"><div class="logo">缠</div>'
          '<div><b>缠论分析 Agent</b><span>CHAN · TERMINAL</span></div></div>')
     st.divider()
-    # ?page=pool 可直接打开「自选股与日报」，方便收藏 / 分享链接
-    _modes = ["单股分析", "自选股与日报"]
-    _idx = 1 if st.query_params.get("page") == "pool" else 0
-    mode = st.radio("模式", _modes, index=_idx, label_visibility="collapsed")
+    # ?page=pool / ?page=scan 可直接打开对应页，方便收藏 / 分享链接。
+    # 用 key= 让「从扫描页点进来」能设置控件状态（Streamlit 只能在控件创建**之前**改它的 state）。
+    _modes = ["单股分析", "自选股与日报", "全市场买点"]
+    if "mode_radio" not in st.session_state:
+        st.session_state["mode_radio"] = {"pool": "自选股与日报",
+                                           "scan": "全市场买点"}.get(
+            st.query_params.get("page"), "单股分析")
+    st.session_state.setdefault("code_input", "600519")
+    mode = st.radio("模式", _modes, key="mode_radio", label_visibility="collapsed")
     st.divider()
 
     if mode == "单股分析":
-        code_in = st.text_input("股票代码", value="600519", max_chars=6, help="6 位 A 股代码")
+        code_in = st.text_input("股票代码", max_chars=6, help="6 位 A 股代码", key="code_input")
         date_in = st.date_input("报告日期", value=date.today())
         html('<div class="chx-sec">选项</div>')
         force = st.checkbox("强制刷新", value=False, help="跳过本地历史，重新实时计算")
@@ -313,11 +388,14 @@ with st.sidebar:
             run_btn = st.button("开始分析", type="primary", width="stretch")
         st.divider()
         st.caption("数据：本地 Parquet（腾讯日线 + 前复权因子）· 信号 / 回测 / LLM：本地 SQLite")
-    else:
+    elif mode == "自选股与日报":
         _pool = load_watchlist()
         html(f'<div class="chx-note">当前股票池 <b>{len(_pool)}</b> 只'
              + ("（自定义）" if is_custom() else "（仓库默认）") + '</div>')
         st.caption("在右侧编辑股票池、查看历史日报。")
+        run_btn = False
+    else:
+        st.caption("全市场扫描结果。点一行即可跳到单股分析。")
         run_btn = False
 
     # 皮肤开关放最下面：🌙 夜晚 / ☀️ 白天
@@ -333,8 +411,12 @@ if mode == "自选股与日报":
     render_pool_page()
     st.stop()
 
+if mode == "全市场买点":
+    render_scan_page()
+    st.stop()
+
 # ==================== 第 3 步：先查历史，无则分析 ====================
-if run_btn:
+if run_btn or st.session_state.pop("auto_run", False):
     code = (code_in or "").strip()
     if len(code) != 6 or not code.isdigit():
         st.error("请输入 6 位数字股票代码")

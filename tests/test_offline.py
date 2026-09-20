@@ -856,6 +856,40 @@ class TestStructureGap(unittest.TestCase):
         self.assertIn("偏低", llm_client._fmt_gap({"zs_gap_days": 10}))
 
 
+class TestMarketScan(unittest.TestCase):
+    """全市场扫描器的纯函数（离线）。
+
+    ok_code 是「能扫谁」的唯一判定 —— 它错了会漏掉整个板块（北交所 92 开头踩过），
+    或者把 ST 放进结果里。
+    """
+
+    def setUp(self):
+        import market_scan
+        self.ms = market_scan
+
+    def test_ok_code_accepts_four_boards(self):
+        for c in ("600519", "688981", "000001", "300750"):
+            self.assertTrue(self.ms.ok_code(c, "测试"), c)
+
+    def test_ok_code_rejects_beijing_exchange(self):
+        for c in ("920100", "830799", "870436", "430047"):
+            self.assertFalse(self.ms.ok_code(c, "某北交所"), c)
+
+    def test_ok_code_rejects_st_and_delisting(self):
+        self.assertFalse(self.ms.ok_code("600519", "ST某某"))
+        self.assertFalse(self.ms.ok_code("600519", "*ST某某"))
+        self.assertFalse(self.ms.ok_code("600519", "某某退"))
+        self.assertFalse(self.ms.ok_code("600519", "某某退市"))
+
+    def test_ok_code_handles_whitespace_and_case(self):
+        self.assertFalse(self.ms.ok_code("600519", " * st 某某 "))
+        self.assertFalse(self.ms.ok_code("600519", " * sT 某某 "))
+
+    def test_ok_code_rejects_malformed(self):
+        for bad in ("", None, "60051", "abcdef", "6005199"):
+            self.assertFalse(self.ms.ok_code(bad, "测试"), repr(bad))
+
+
 class TestAppBoots(unittest.TestCase):
     """app.py 能渲染出首屏（不联网、不点分析）。
 
