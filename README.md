@@ -287,6 +287,7 @@ python verify_deepseek.py     # LLM 连通性（需要 DEEPSEEK_API_KEY）
 python verify_fallback.py     # 数据兜底 22 项断言
 python verify_fallback.py --offline   # 跳过需要联网的用例
 python verify_edge.py         # 信号有效性对照（基准 / 成本 / 置信区间 / 分布）
+python verify_robustness.py all   # 参数敏感性 + 信号稳定性（证伪用）
 ```
 
 `verify_fallback.py` 会自己备份 → 删掉本地 Parquet → 调 `analyze_stock` → 检查是否自动拉回 → 模拟断网 → 最后还原原文件，跑完数据不会丢。
@@ -334,7 +335,41 @@ python verify_edge.py --blocks 4           # 追加 4 段时间分块
 但同一段的基准是 **+1.20%** —— 也就是说**随机入场拿到的比信号还多**，超额只有 +0.05%。
 只看「扣费后为正」会得出完全相反的结论。
 
-除此之外还有一套**完全离线**的单元测试（不联网、不需要本地行情数据，1.5 秒跑完，54 项）：
+### `verify_robustness.py`：参数敏感性与信号稳定性
+
+两个**证伪**用的检查 —— 作用是「在下结论之前先知道结论有多不牢」，**不是调优**。
+
+```bash
+python verify_robustness.py sens            # 参数敏感性
+python verify_robustness.py stab            # 信号稳定性
+python verify_robustness.py all --quick     # 两个都跑，只取 3 只股票
+```
+
+| 模式 | 问的问题 |
+| --- | --- |
+| `sens` | 把 `min_bi_len` / 中枢延伸上限 / `POWER_TOL` 各扫一遍：① 信号集合换掉多少（**Jaccard 重合度**）② 多出来/消失的信号表现如何 |
+| `stab` | 前缀重算：K 线增量更新后，**已确认的历史信号不应被改写** |
+
+两者共用同一套核心，并且**开工前先做口径自检**（`signals_on()` 必须与 `confirm_dates.compute_signals()`
+逐条一致），防止两边各写一份、悄悄漂移。
+
+> ⚠️ 这里的入场口径是「信号日次一交易日开盘」，**不是**回测的「确认日次一交易日开盘」
+> （后者要对每条信号跑前缀重算，代价极高）。敏感性/稳定性只要求跨参数、跨前缀一致，
+> 所以**这里的收益数字不要和 `verify_edge.py` 直接比**。
+
+**实测结果（12 只 / 188 条基准信号）**：
+
+| 参数 | Jaccard 范围 | 超额随参数变化 | 结论 |
+| --- | --- | --- | --- |
+| `min_bi_len` | **0.104 ~ 1.000** | +0.52% ~ +2.79%（5 倍） | ⚠️ **高度数值敏感** |
+| 中枢延伸上限 | 0.820 ~ 1.000 | +1.76% ~ +1.99% | 稳健 |
+| `POWER_TOL` | 0.936 ~ 1.000 | +1.74% ~ +1.83% | 稳健 |
+
+信号稳定性：**555 条已确认信号，0 条被改写、0 条新出现** —— 增量使用是安全的。
+
+---
+
+除此之外还有一套**完全离线**的单元测试（不联网、不需要本地行情数据，2.4 秒跑完，67 项）：
 
 ```bash
 python -m unittest discover -s tests -v

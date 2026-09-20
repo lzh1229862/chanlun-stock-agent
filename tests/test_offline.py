@@ -453,6 +453,68 @@ class TestVerifyEdge(unittest.TestCase):
         self.assertIsNone(self.ve.stats_for([], 5, 0.002))
 
 
+class TestVerifyRobustness(unittest.TestCase):
+    """参数敏感性 / 信号稳定性里的纯函数（离线）。
+
+    重点守两件事：
+      1. 扫描范围必须包含「当前值」，否则输出里没法做对照
+      2. signals_on 的默认参数必须跟着 min_loop 的常量走，不能各写一份
+    """
+
+    def setUp(self):
+        import verify_robustness
+        self.vr = verify_robustness
+
+    def test_jaccard(self):
+        self.assertEqual(self.vr.jaccard(set(), set()), 1.0)
+        self.assertEqual(self.vr.jaccard({1, 2}, {1, 2}), 1.0)
+        self.assertAlmostEqual(self.vr.jaccard({1, 2}, {2, 3}), 1 / 3)
+        self.assertEqual(self.vr.jaccard({1}, set()), 0.0)
+        self.assertEqual(self.vr.jaccard(set(), {1}), 0.0)
+
+    def test_forward_returns_uses_next_open(self):
+        """入场必须是**信号日次一交易日**开盘 —— 用信号日开盘就是未来函数。"""
+        bars = pd.DataFrame({
+            "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03",
+                                    "2026-01-04", "2026-01-05", "2026-01-06"]),
+            "open": [100.0] * 6,
+            "close": [100.0, 100.0, 110.0, 120.0, 130.0, 140.0],
+        })
+        got = self.vr.forward_returns({("2026-01-01", "第一类买点")}, bars, 3)
+        self.assertEqual(len(got), 1)
+        self.assertAlmostEqual(got[0], 0.20, places=6)
+
+    def test_forward_returns_sell_is_direction_adjusted(self):
+        bars = pd.DataFrame({
+            "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03",
+                                    "2026-01-04", "2026-01-05", "2026-01-06"]),
+            "open": [100.0] * 6,
+            "close": [100.0, 100.0, 110.0, 120.0, 130.0, 140.0],
+        })
+        got = self.vr.forward_returns({("2026-01-01", "第一类卖点")}, bars, 3)
+        self.assertAlmostEqual(got[0], -0.20, places=6)
+
+    def test_forward_returns_skips_signals_at_the_edge(self):
+        bars = pd.DataFrame({
+            "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"]),
+            "open": [100.0] * 3,
+            "close": [100.0] * 3,
+        })
+        self.assertEqual(self.vr.forward_returns({("2026-01-03", "第一类买点")}, bars, 3), [])
+        self.assertEqual(self.vr.forward_returns({("2099-01-01", "第一类买点")}, bars, 3), [])
+
+    def test_baseline_matches_min_loop_constants(self):
+        import min_loop
+        self.assertEqual(self.vr.BASELINE["min_bi_len"], min_loop.MIN_BI_LEN)
+        self.assertEqual(self.vr.BASELINE["max_zs_bis"], min_loop.MAX_ZS_BIS)
+        self.assertEqual(self.vr.BASELINE["power_tol"], min_loop.POWER_TOL)
+
+    def test_every_sweep_contains_current_value(self):
+        for key, values, _ in self.vr.SWEEPS:
+            self.assertIn(self.vr.BASELINE[key], values,
+                          "%s 的扫描范围必须包含当前值，否则没法对照" % key)
+
+
 class TestAppBoots(unittest.TestCase):
     """app.py 能渲染出首屏（不联网、不点分析）。
 
