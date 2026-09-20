@@ -191,13 +191,18 @@ def unconditional(code, window, lo_date, hi_date):
     return out
 
 
-def stats_for(sub, window, cost):
+def stats_for(sub, window, cost, idx_map=None):
     """一批同类型同窗口的回测行 -> 有效性指标。
 
     基准在**这一批自己的时间跨度内**按股票分别重算，再按信号条数加权。
+
+    传 idx_map 时额外算「同窗口指数收益」与「相对指数的超额（真 alpha）」：
+        alpha = 方向调整后的信号收益 − 方向调整后的指数收益
+    方向调整很关键 —— 卖点的收益是「股价下跌」，对应的市场基准也该取负，
+    否则卖点在牛市里的 alpha 会被系统性算错。
     """
-    if not sub:
-        return None
+    if len(sub) < 2:
+        return None                      # n<2 算不出区间，直接当样本不足
     d = bt.direction_of(sub[0]["signal_type"])
     rets = [r["return_pct"] for r in sub]
     m, lo, hi = mean_ci(rets)
@@ -214,8 +219,20 @@ def stats_for(sub, window, cost):
     base_wr = sum(v * n for _, v, n in bases) / tot
     if d < 0:
         base_wr = 1 - base_wr
+    idxs, alphas = [], []
+    if idx_map:
+        for r in sub:
+            ir = index_return(idx_map, r.get("entry_date"), r.get("exit_date"))
+            if ir is None:
+                continue
+            idxs.append(d * ir)
+            alphas.append(r["return_pct"] - d * ir)
+    am, alo, ahi = mean_ci(alphas) if len(alphas) > 1 else (None, None, None)
+    im = mean(idxs) if idxs else None
+
     k = sum(1 for v in rets if v > 0)
     return {"n": len(sub), "dir": d, "mean": m, "lo": lo, "hi": hi,
+            "idx": im, "alpha": am, "alpha_lo": alo, "alpha_hi": ahi, "n_alpha": len(alphas),
             "base": base, "exc": m - base, "exc_lo": lo - base, "exc_hi": hi - base,
             "net": m - cost, "wr": k / len(sub), "wr_ci": wilson(k, len(sub)),
             "base_wr": base_wr, "pf": profit_factor(rets),
@@ -253,11 +270,29 @@ def load_rows(scope):
     conn = ss.connect()
     try:
         cur = conn.execute(
-            "SELECT stock_code, signal_type, entry_date, window, return_pct, is_win "
+            "SELECT stock_code, signal_type, signal_date, entry_date, exit_date, "
+            "window, return_pct, is_win "
             "FROM backtest WHERE scope=? ORDER BY entry_date", (scope,))
         return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def make_idx_map(index_df):
+    """日期 -> (开, 收)。用于算同窗口的指数收益。"""
+    if index_df is None or index_df.empty:
+        return {}
+    d = index_df.copy()
+    d["k"] = d["date"].dt.strftime("%Y-%m-%d")
+    return {r["k"]: (float(r["open"]), float(r["close"])) for _, r in d.iterrows()}
+
+
+def index_return(idx_map, entry_date, exit_date):
+    """指数在同一入场日/退出日上的收益（口径与个股完全一致：开盘进、收盘出）。"""
+    a, b = idx_map.get(entry_date), idx_map.get(exit_date)
+    if not a or not b or not a[0]:
+        return None
+    return (b[1] - a[0]) / a[0]
 
 
 def cost_per_round_trip(a):
@@ -370,6 +405,64 @@ def table_blocks(rows, windows, cost, n):
         print()
 
 
+def table_regime(rows, windows, cost, min_n, idx_map, idx_label):
+    """表 E：按市场状态分层。
+
+    这是「样本只有一段行情」这个问题的正面回答：同一套规则在不同市场状态下
+    表现差多少。如果某类信号只在「上行」里好看，那它在别的环境就不可靠。
+    """
+    print()
+    print("【表 E】按市场状态分层（基准指数：%s）" % idx_label)
+    print("  状态定义：指数收盘 vs 200 日均线 + 20 日动量，**只用信号日及之前的数据**（无未来函数）")
+    cnt = {}
+    for r in rows:
+        cnt[r["regime"]] = cnt.get(r["regime"], 0) + 1
+    order = [k for k in ("上行", "震荡", "下行", "未知") if k in cnt]
+    print("  信号按信号日的状态分布：" + "　".join("%s %d 条" % (k, cnt[k]) for k in order))
+
+    for w in windows:
+        per = {}
+        for r in rows:
+            if r["window"] != w:
+                continue
+            ir = index_return(idx_map, r.get("entry_date"), r.get("exit_date"))
+            if ir is not None:
+                per.setdefault(r["regime"], []).append(ir)
+        if per:
+            print("  指数自身同期（%d 日）：%s" % (w, "　".join(
+                "%s %s" % (k, pct(mean(v))) for k, v in sorted(per.items()))))
+
+    print()
+    print("  按「方向 × 状态」聚合（再按类型切每组只剩个位数，没意义；类型明细看表 A/B）")
+    print()
+    print("  %-6s %-4s %-5s %-5s %-11s %-10s %-11s %-11s %-9s %s"
+          % ("方向", "窗口", "状态", "样本", "信号均值", "指数同期", "超额(指数)", "超额(同股)",
+             "扣费后", "判断"))
+    for w in windows:
+        for label, want in (("全部", None), ("买点", "买"), ("卖点", "卖")):
+            for reg in order:
+                sub = [r for r in rows if r["window"] == w and r["regime"] == reg
+                       and (want is None or want in r["signal_type"])]
+                s = stats_for(sub, w, cost, idx_map)
+                if s is None:
+                    continue
+                print("  %-6s %-4s %-5s %-5d %-11s %-10s %-11s %-11s %-9s %s"
+                      % (label, w, reg, s["n"], pct(s["mean"]), pct(s["idx"]),
+                         pct(s["alpha"]), pct(s["exc"]), pct(s["net"]), judge_alpha(s, min_n)))
+        print()
+
+
+def judge_alpha(s, min_n):
+    """按「相对指数的超额」判断 —— 这才是真 alpha。"""
+    if s is None or s.get("alpha") is None:
+        return "无指数数据"
+    if s["n"] < min_n:
+        return "⚠ 样本不足"
+    if s["alpha_lo"] <= 0 <= s["alpha_hi"]:
+        return "alpha 不显著"
+    return "✓ 正 alpha" if s["alpha"] > 0 else "✗ 负 alpha"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scope", choices=["signal", "day"], default="signal")
@@ -380,6 +473,9 @@ def main():
     ap.add_argument("--blocks", type=int, default=None, metavar="N",
                     help="把样本期等分成 N 段做 regime 稳健性检查")
     ap.add_argument("--zero-cost", action="store_true", help="不计任何交易成本")
+    ap.add_argument("--index", default=None, help="基准指数代码，默认 000300（沪深300）")
+    ap.add_argument("--regime", action="store_true",
+                    help="追加表 E：按市场状态分层（需要指数数据）")
     for k in DEFAULTS:
         ap.add_argument("--" + k, type=float, default=None)
     a = ap.parse_args()
@@ -428,6 +524,26 @@ def main():
         table_split(rows, windows, cost, a.min_n, a.split)
     if a.blocks:
         table_blocks(rows, windows, cost, a.blocks)
+
+    if a.regime:
+        import market_regime as mr
+        from storage_index import DEFAULT_INDEX, ensure_index, index_name
+        code = a.index or DEFAULT_INDEX
+        idx_df, src, err = ensure_index(code)
+        if idx_df is None:
+            print()
+            print("【表 E】跳过：指数取不到（%s）" % err)
+        else:
+            reg_df = mr.with_indicators(idx_df)
+            idx_map = make_idx_map(idx_df)
+            for r in rows:
+                r["regime"] = mr.regime_on(reg_df, r["signal_date"])
+            print()
+            print("指数 %s %s：%d 行（%s ~ %s）source=%s%s"
+                  % (code, index_name(code), len(idx_df),
+                     idx_df["date"].iloc[0].date(), idx_df["date"].iloc[-1].date(),
+                     src, ("  警告：" + err) if err else ""))
+            table_regime(rows, windows, cost, a.min_n, idx_map, "%s %s" % (code, index_name(code)))
 
     print()
     print("=" * 112)

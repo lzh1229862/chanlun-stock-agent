@@ -462,6 +462,131 @@ class TestVerifyEdge(unittest.TestCase):
         self.assertEqual(self.ve.welch_diff_ci([1], [2, 3]), (None, None, None))
         self.assertEqual(self.ve.welch_diff_ci([1, 2], [3]), (None, None, None))
 
+    def test_index_return_uses_open_to_close(self):
+        d = pd.DataFrame({"date": pd.to_datetime(["2026-01-05", "2026-01-09"]),
+                          "open": [100.0, 200.0], "close": [110.0, 220.0],
+                          "high": [0.0, 0.0], "low": [0.0, 0.0], "volume": [0, 0]})
+        im = self.ve.make_idx_map(d)
+        self.assertAlmostEqual(self.ve.index_return(im, "2026-01-05", "2026-01-09"), 1.20)
+        self.assertIsNone(self.ve.index_return(im, "2026-01-05", "2099-01-01"))
+        self.assertIsNone(self.ve.index_return(im, "1999-01-01", "2026-01-09"))
+        self.assertEqual(self.ve.make_idx_map(None), {})
+
+
+class TestStorageIndex(unittest.TestCase):
+    """指数日线存取（离线：只测符号、过期、落盘往返）。"""
+
+    def setUp(self):
+        import storage_index
+        self.si = storage_index
+        self._tmp = tempfile.TemporaryDirectory()
+        self._saved = storage_index.INDEX_DIR
+        storage_index.INDEX_DIR = Path(self._tmp.name)
+
+    def tearDown(self):
+        self.si.INDEX_DIR = self._saved
+        self._tmp.cleanup()
+
+    def test_symbol_prefix(self):
+        """000xxx 在上交所、399xxx 在深交所 —— 搞反了会拉到错误的指数。"""
+        self.assertEqual(self.si.symbol_of("000300"), "sh000300")
+        self.assertEqual(self.si.symbol_of("000001"), "sh000001")
+        self.assertEqual(self.si.symbol_of("399001"), "sz399001")
+
+    def test_index_name_known_and_fallback(self):
+        self.assertEqual(self.si.index_name("000300"), "沪深300")
+        self.assertEqual(self.si.index_name("999999"), "999999")
+
+    def test_missing_file_reads_as_empty(self):
+        df = self.si.load_index("000300")
+        self.assertTrue(df.empty)
+        self.assertEqual(list(df.columns), self.si.COLUMNS)
+        self.assertTrue(self.si.is_stale(df))
+
+    def test_save_load_roundtrip_sorted_dedup(self):
+        raw = pd.DataFrame({
+            "date": pd.to_datetime(["2026-01-09", "2026-01-05", "2026-01-05"]),
+            "open": [3.0, 1.0, 9.0], "high": [3.0, 1.0, 9.0],
+            "low": [3.0, 1.0, 9.0], "close": [3.0, 1.0, 9.0], "volume": [1, 1, 1]})
+        self.assertEqual(self.si.save_index("000300", raw), 2)
+        got = self.si.load_index("000300")
+        self.assertEqual([str(d.date()) for d in got["date"]], ["2026-01-05", "2026-01-09"])
+        self.assertEqual(got["close"].iloc[0], 9.0, "重复日期应保留最后一条")
+
+    def test_is_stale_boundary(self):
+        import datetime as _dt
+        today = _dt.date(2026, 1, 10)
+        fresh = pd.DataFrame({"date": pd.to_datetime(["2026-01-08"])})
+        old = pd.DataFrame({"date": pd.to_datetime(["2025-12-01"])})
+        self.assertFalse(self.si.is_stale(fresh, today=today))
+        self.assertTrue(self.si.is_stale(old, today=today))
+        self.assertTrue(self.si.is_stale(None, today=today))
+
+
+class TestMarketRegime(unittest.TestCase):
+    """市场状态判断（离线，纯函数）。"""
+
+    def setUp(self):
+        import market_regime
+        self.mr = market_regime
+
+    @staticmethod
+    def _idx(closes, start="2026-01-05"):
+        n = len(closes)
+        return pd.DataFrame({
+            "date": pd.bdate_range(start, periods=n),
+            "open": closes, "high": closes, "low": closes,
+            "close": closes, "volume": [1] * n})
+
+    def test_uptrend_labels(self):
+        d = self.mr.with_indicators(self._idx([100, 101, 102, 103, 104, 105]),
+                                    ma_win=3, mom_win=2)
+        self.assertEqual(list(d["regime"][:2]), ["未知", "未知"], "样本不足应是未知")
+        self.assertEqual(list(d["regime"][2:]), ["上行"] * 4)
+        self.assertTrue(bool(d["above_ma"].iloc[2]))
+
+    def test_downtrend_labels(self):
+        d = self.mr.with_indicators(self._idx([105, 104, 103, 102, 101, 100]),
+                                    ma_win=3, mom_win=2)
+        self.assertEqual(list(d["regime"][2:]), ["下行"] * 4)
+
+    def test_sideways_is_the_else_branch(self):
+        # 第 4 根：收盘跌破均线但 2 日动量刚好为 0 -> 既不上行也不下行
+        d = self.mr.with_indicators(self._idx([100, 101, 102, 101, 100, 99]),
+                                    ma_win=3, mom_win=2)
+        self.assertEqual(d["regime"].iloc[2], "上行")
+        self.assertEqual(d["regime"].iloc[3], "震荡")
+        self.assertEqual(d["regime"].iloc[4], "下行")
+
+    def test_label_edge_cases(self):
+        self.assertEqual(self.mr._label(True, float("nan"), 1.0, 1.0), self.mr.UNKNOWN)
+        self.assertEqual(self.mr._label(True, float("nan"), 1.0, float("nan")), self.mr.UNKNOWN)
+        self.assertEqual(self.mr._label(True, 0.01, 1.0, 0.5), "上行")
+        self.assertEqual(self.mr._label(False, -0.01, 1.0, 0.5), "下行")
+        self.assertEqual(self.mr._label(True, -0.01, 1.0, 0.5), "震荡")
+        self.assertEqual(self.mr._label(False, 0.01, 1.0, 0.5), "震荡")
+
+    def test_row_on_never_returns_future(self):
+        """用「<= date」而不是「== date」：非交易日也要能取到状态，但绝不能取到未来。"""
+        d = self.mr.with_indicators(self._idx([100, 101, 102, 103, 104, 105]),
+                                    ma_win=3, mom_win=2)
+        r = self.mr.row_on(d, "2026-01-07")
+        self.assertEqual(str(r["date"].date()), "2026-01-07")
+        r = self.mr.row_on(d, "2026-01-10")          # 周六，无行情
+        self.assertEqual(str(r["date"].date()), "2026-01-09", "应回退到最近一个已有交易日")
+        self.assertIsNone(self.mr.row_on(d, "2026-01-01"), "早于全部数据应返回 None")
+
+    def test_regime_on_empty_and_early(self):
+        d = self.mr.with_indicators(self._idx([100, 101, 102]), ma_win=3, mom_win=2)
+        self.assertEqual(self.mr.regime_on(d, "2026-01-01"), self.mr.UNKNOWN)
+        self.assertEqual(self.mr.regime_on(pd.DataFrame(), "2026-01-07"), self.mr.UNKNOWN)
+
+    def test_above_ma_on(self):
+        d = self.mr.with_indicators(self._idx([100, 101, 102, 103, 104, 105]),
+                                    ma_win=3, mom_win=2)
+        self.assertTrue(self.mr.above_ma_on(d, "2026-01-09"))
+        self.assertIsNone(self.mr.above_ma_on(d, "2026-01-01"))
+
 
 class TestVerifyRobustness(unittest.TestCase):
     """参数敏感性 / 信号稳定性里的纯函数（离线）。
