@@ -235,6 +235,7 @@ def stats_for(sub, window, cost, idx_map=None):
             "idx": im, "alpha": am, "alpha_lo": alo, "alpha_hi": ahi, "n_alpha": len(alphas),
             "base": base, "exc": m - base, "exc_lo": lo - base, "exc_hi": hi - base,
             "net": m - cost, "wr": k / len(sub), "wr_ci": wilson(k, len(sub)),
+            "rets": rets,          # 原始收益，供两组做 Welch 检验
             "base_wr": base_wr, "pf": profit_factor(rets),
             "streak": max_losing_streak([(r["entry_date"], r["is_win"]) for r in sub]),
             "p05": quantile(rets, 0.05)}
