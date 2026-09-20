@@ -6,13 +6,14 @@
     python -m streamlit run app.py
     或双击 run_ui.bat
 
-对应设计的 5 步
+对应设计的步骤
     第 1 步 公共分析函数  analyzer.analyze_stock / load_from_db / generate_llm_summary / load_ohlc
     第 2 步 最小界面      侧边栏搜索框 + 分析按钮 + 结果展示
     第 3 步 历史查询      先查 SQLite，有则展示，无则实时分析；含「强制刷新」
     第 4 步 可视化        K 线 + 分型 / 笔 / 中枢 / 买卖点标注
     第 5 步 LLM 按需      先出规则结果，「生成 AI 总结」按钮
     第 6 步 自选股与日报  编辑股票池（写 config/watchlist.local.yaml）+ 查看历史日报
+    第 7 步 双皮肤        左下角 🌙 夜晚 / ☀️ 白天 切换（skin.py，纯 CSS 联动）
 """
 from datetime import date
 from pathlib import Path
@@ -21,8 +22,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import skin
 from analyzer import (analyze_stock, ensure_kline, generate_llm_summary, load_from_db,
                       load_ohlc)
+from fundamentals import fmt_num, fmt_pct, fmt_yi, fmt_yi_plain
 from storage_kline import load_kline
 from watchlist_store import (MAX_STOCKS, is_custom, load_default, load_watchlist,
                              parse_codes, reset_watchlist, save_watchlist, validate_codes)
@@ -33,12 +36,94 @@ LEVEL_TAG = {"第一类买点": "1买", "第二类买点": "2买", "第三类买
 REPORT_DIR = Path("reports")
 
 
+# ==================== 视图层小工具（无业务逻辑）====================
+
+def esc(v):
+    if v is None:
+        return "—"
+    return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def html(s):
+    """注入样式 / 片段。st.html 是官方接口，无需 unsafe_allow_html，且不占版面。"""
+    st.html(s)
+
+
+def is_night():
+    return st.session_state.get("skin", "night") == "night"
+
+
+def section(no, title, hint=""):
+    return (f'<div class="chx-sec"><span class="no">{no}</span><h2>{title}</h2>'
+            f'<span class="rule"></span><span class="hint">{esc(hint)}</span></div>')
+
+
+def metric_cards(items):
+    """items: [(标签, 值, 值后缀, 副行, 值配色class)]，值用等宽字体。"""
+    cells = []
+    for label, value, suffix, sub, cls in items:
+        unit = f"<u>{esc(suffix)}</u>" if suffix else ""
+        cells.append(f'<div class="chx-metric"><div class="k">{esc(label)}</div>'
+                     f'<div class="v {cls}">{esc(value)}{unit}</div>'
+                     f'<div class="s">{sub}</div></div>')
+    return '<div class="chx-metrics">' + "".join(cells) + "</div>"
+
+
+def table(headers, rows, note=""):
+    """rows: [[单元格HTML, ...]]，单元格自行负责转义 / 上色。"""
+    head = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+    note_html = f'<div class="chx-footline">{note}</div>' if note else ""
+    return ('<div class="chx-card tight"><div class="chx-scroll">'
+            f'<table class="chx-table"><thead><tr>{head}</tr></thead>'
+            f'<tbody>{body}</tbody></table></div>{note_html}</div>')
+
+
+REPORT_CARD_CSS = (
+    '<style>'
+    '.chx-reports{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}'
+    '@media (max-width:1100px){.chx-reports{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+    '.chx-reports .report{border:1px solid var(--line);border-radius:13px;background:var(--card);'
+    'padding:14px 16px;position:relative;overflow:hidden;box-shadow:var(--shadow)}'
+    '.chx-reports .report.on{border-color:color-mix(in srgb,var(--accent) 45%,transparent)}'
+    '.chx-reports .report.on:after{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;'
+    'background:var(--accent);box-shadow:0 0 12px var(--accent)}'
+    '.chx-reports .report .d{font-family:var(--mono);font-size:15px;color:var(--txt);letter-spacing:.04em}'
+    '.chx-reports .report .m{font-family:var(--mono);font-size:11px;color:var(--txt-3);'
+    'margin-top:9px;line-height:1.9}'
+    '.chx-reports .report .m b{color:var(--txt-2);font-weight:500}'
+    '.chx-reports .report .go{margin-top:12px;font-size:11.5px;color:var(--accent);'
+    'font-family:var(--mono);letter-spacing:.06em}'
+    '.chx-badge{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:5px;'
+    'border:1px solid var(--line);color:var(--txt-3)}'
+    '</style>'
+)
+
+
 def list_daily_reports():
     """reports/ 下有 report.md 的日期目录，倒序。"""
     if not REPORT_DIR.exists():
         return []
     return sorted([p.name for p in REPORT_DIR.iterdir()
                    if p.is_dir() and (p / "report.md").exists()], reverse=True)
+
+
+def report_counts(day):
+    """从 signals.csv 估一下这份日报的信号量；读不到就返回 0。"""
+    p = REPORT_DIR / day / "signals.csv"
+    if not p.exists():
+        return 0, 0
+    try:
+        csv = pd.read_csv(p)
+        n = len(csv)
+        n_main = 0
+        if "is_primary" in csv.columns:
+            n_main = int(pd.to_numeric(csv["is_primary"], errors="coerce").fillna(0).sum())
+        elif "主信号" in csv.columns:
+            n_main = int((csv["主信号"].astype(str).str.strip() == "★").sum())
+        return n, n_main
+    except Exception:
+        return 0, 0
 
 
 def warm_up(codes):
@@ -68,16 +153,25 @@ def warm_up(codes):
 
 def render_pool_page():
     """自选股编辑 + 历史日报查看（页面下半部分就是日报，点开即读）。"""
-    st.title("自选股与日报")
-    st.caption("股票池决定每日批处理扫哪些股票；改完第二天（周一至周五 18:05 的计划任务）自动生效。")
-
     pool = load_watchlist()
     custom = is_custom()
-    src_txt = ("自定义（config/watchlist.local.yaml）" if custom
-               else "仓库默认（config/settings.yaml）")
-    st.caption(f"当前池 **{len(pool)}** 只 · 来源：{src_txt}")
+    src_txt = "自定义（config/watchlist.local.yaml）" if custom else "仓库默认（config/settings.yaml）"
+    dates = list_daily_reports()
 
-    st.subheader("编辑股票池")
+    html('<div class="chx-hero"><div class="chx-hero-top"><div>'
+         '<div class="chx-title">自选股与日报</div>'
+         f'<div class="chx-meta">股票池决定每日批处理扫哪些股票 · 上限 {MAX_STOCKS} 只 · 6 位 A 股代码</div>'
+         '</div>'
+         f'<div class="chx-price"><b class="chx-cy">{len(pool)}<small>只</small></b>'
+         f'<span>{esc(src_txt)}</span></div></div>'
+         '<div class="chx-strip">'
+         f'<div>当前池<b>{len(pool)} 只</b></div>'
+         f'<div>日报份数<b>{len(dates)} 份</b></div>'
+         f'<div>最近日报<b>{esc(dates[0]) if dates else "—"}</b></div>'
+         '<div>批处理<b>工作日 18:05</b></div>'
+         '</div></div>')
+
+    html(section("01", "编辑股票池", "每行一个，或逗号 / 空格分隔"))
     ver = st.session_state.get("pool_ver", 0)
     text = st.text_area("股票代码", value=chr(10).join(pool), height=200,
                         key=f"pool_text_{ver}",
@@ -153,39 +247,54 @@ def render_pool_page():
         if info["rows"]:
             st.caption(f"已预热历史数据共 {info['rows']} 行；第二天批处理不用再临时拉取。")
 
-    st.divider()
-    st.subheader("历史日报")
-    dates = list_daily_reports()
+    html(section("02", "历史日报", f"reports/ 目录 · 共 {len(dates)} 份"))
     if not dates:
         st.info("还没有日报。跑一次 `python main.py`，或双击 `run.bat`，就会有第一份。")
         return
-    st.caption(f"共 {len(dates)} 份（reports/ 目录，每天一份全池报告）")
-    pick = st.selectbox("选择日期", dates, key="report_pick")
-    if st.button("查看这份日报", width="stretch"):
-        st.session_state["view_report"] = pick
 
     view = st.session_state.get("view_report")
+    cards = []
+    for d in dates[:12]:
+        n_sig, n_main = report_counts(d)
+        detail = (f'可交易信号 <b>{n_sig}</b> 条 · 主信号 <b>{n_main}</b> 条'
+                  if n_sig else '<span class="chx-badge">无信号</span>')
+        cards.append(f'<div class="report {"on" if view == d else ""}">'
+                     f'<div class="d">{d}</div><div class="m">{detail}</div>'
+                     f'<div class="go">{"正在查看 ↓" if view == d else "查看这份日报 →"}</div></div>')
+    html(REPORT_CARD_CSS + '<div class="chx-reports">' + "".join(cards) + "</div>")
+
+    c1, c2 = st.columns([3, 1])
+    pick = c1.selectbox("选择日期", dates, key="report_pick",
+                        label_visibility="collapsed")
+    if c2.button("打开日报", width="stretch"):
+        st.session_state["view_report"] = pick
+        st.rerun()
+
     if not view:
         return
     path = REPORT_DIR / view / "report.md"
     if not path.exists():
         st.error(f"文件不存在：{path}")
         return
-    st.divider()
-    head = st.columns([3, 1])
-    head[0].subheader(f"日报 · {view}")
+    html(section("03", f"日报 · {view}", f"reports/{view}/report.md"))
     csv_path = path.parent / "signals.csv"
     if csv_path.exists():
-        head[1].download_button("下载 signals.csv", csv_path.read_bytes(),
-                                file_name=f"signals-{view}.csv", mime="text/csv",
-                                width="stretch")
+        st.download_button("下载 signals.csv", csv_path.read_bytes(),
+                           file_name=f"signals-{view}.csv", mime="text/csv")
+    html('<div class="chx-card">')
     st.markdown(path.read_text(encoding="utf-8"))
+    html("</div>")
 
 
 st.set_page_config(page_title="缠论分析 Agent", layout="wide")
 
-# ==================== 第 2 步：侧边栏（模式切换 + 查询 / 股票池）====================
+# ==================== 皮肤：白天 / 夜晚 ====================
+html(skin.build_css())
+
 with st.sidebar:
+    html('<div class="chx-brand"><div class="logo">缠</div>'
+         '<div><b>缠论分析 Agent</b><span>CHAN · TERMINAL</span></div></div>')
+    st.divider()
     # ?page=pool 可直接打开「自选股与日报」，方便收藏 / 分享链接
     _modes = ["单股分析", "自选股与日报"]
     _idx = 1 if st.query_params.get("page") == "pool" else 0
@@ -193,21 +302,31 @@ with st.sidebar:
     st.divider()
 
     if mode == "单股分析":
-        st.header("查询")
         code_in = st.text_input("股票代码", value="600519", max_chars=6, help="6 位 A 股代码")
         date_in = st.date_input("报告日期", value=date.today())
-        st.divider()
+        html('<div class="chx-sec">选项</div>')
         force = st.checkbox("强制刷新", value=False, help="跳过本地历史，重新实时计算")
-        with_llm = st.checkbox("分析时立即调用 LLM", value=False, help="默认关闭：先看规则结果，再按需生成")
-        run_btn = st.button("开始分析", type="primary", width="stretch")
+        with_llm = st.checkbox("分析时立即调用 LLM", value=False,
+                               help="默认关闭：先看规则结果，再按需生成")
+        with st.container(key="cta_main"):
+            run_btn = st.button("开始分析", type="primary", width="stretch")
         st.divider()
-        st.caption("数据：本地 Parquet（腾讯日线 + 前复权因子）")
-        st.caption("信号 / 回测 / LLM：本地 SQLite")
+        st.caption("数据：本地 Parquet（腾讯日线 + 前复权因子）· 信号 / 回测 / LLM：本地 SQLite")
     else:
         _pool = load_watchlist()
-        st.caption(f"当前股票池 **{len(_pool)}** 只"
-                   + ("（自定义）" if is_custom() else "（仓库默认）"))
+        html(f'<div class="chx-note">当前股票池 <b>{len(_pool)}</b> 只'
+             + ("（自定义）" if is_custom() else "（仓库默认）") + '</div>')
         st.caption("在右侧编辑股票池、查看历史日报。")
+        run_btn = False
+
+    # 皮肤开关放最下面：🌙 夜晚 / ☀️ 白天
+    st.divider()
+    # 白天开关：未勾选 = 🌙 夜晚（默认），勾选 = ☀️ 白天
+    with st.container(key="chx_skin"):
+        day_on = st.checkbox("skin_day", label_visibility="collapsed",
+                             value=st.session_state.get("skin", "night") == "day",
+                             key="skin_day_toggle")
+    st.session_state["skin"] = "day" if day_on else "night"
 
 if mode == "自选股与日报":
     render_pool_page()
@@ -234,49 +353,94 @@ if run_btn:
 
 res = st.session_state.get("res")
 if res is None:
-    st.title("缠论分析 Agent")
-    st.info("在左侧输入股票代码，点「开始分析」。")
-    st.caption("提示：本地有历史的股票会直接读库（快、不花钱）；没有历史的会实时计算。")
+    html('<div class="chx-hero"><div class="chx-hero-top"><div>'
+         '<div class="chx-title">缠论分析 Agent</div>'
+         '<div class="chx-meta">在左侧输入 6 位 A 股代码，点「开始分析」</div></div></div>'
+         '<div class="chx-strip">'
+         '<div>第一步<b>输入代码</b></div>'
+         '<div>第二步<b>选择日期</b></div>'
+         '<div>第三步<b>开始分析</b></div>'
+         '</div></div>')
+    st.info("本地有历史的股票会直接读库（快、不花钱）；没有历史的会实时计算。"
+            "左下角可切换 🌙 夜晚 / ☀️ 白天 两套界面。")
+    st.caption("非投资建议 · 不含自动下单 · 数据来源：本地 Parquet + SQLite")
     st.stop()
 
 if not res.get("ok"):
     st.error(res.get("error") or "分析失败")
     st.stop()
 
-st.title(f"{res['code']}　{res.get('name', '')}")
-st.caption(f"{res.get('board', '')} · 涨跌幅限制 ±{res.get('limit_ratio', 0):.0%}"
-           f" · 来源：{res.get('source')}（{st.session_state.get('note', '')}）"
-           f" · 耗时 {res.get('elapsed')}s")
+# ==================== 结果：头部带 + 读数卡 ====================
+k = res.get("kline") or {}
+stt = res.get("structure") or {}
+sigs = res.get("signals") or []
+note = st.session_state.get("note", "")
+
+close = k.get("close_raw")
+try:
+    close_txt = f"{float(close):,.2f}"
+except (TypeError, ValueError):
+    close_txt = "—"
+
+chg = None
+try:
+    _df = load_ohlc(res["code"])
+    if len(_df) >= 2:
+        chg = float(_df["close"].iloc[-1]) / float(_df["close"].iloc[-2]) - 1
+except Exception:
+    chg = None
+if chg is None:
+    chg_html, close_cls = "", "chx-dim"
+else:
+    chg_html = f'{"▲" if chg >= 0 else "▼"} {chg:+.2%}'
+    close_cls = "chx-up" if chg >= 0 else "chx-down"
+
+cached = res.get("source") == "cache"
+html('<div class="chx-hero"><div class="chx-hero-top"><div>'
+     f'<div class="chx-title">{esc(res.get("code"))}<small>{esc(res.get("name", ""))}</small></div>'
+     f'<div class="chx-meta">{esc(res.get("board", ""))} · 涨跌幅限制 '
+     f'±{res.get("limit_ratio", 0):.0%} · 来源 {esc(res.get("source"))} · {esc(note)}'
+     f' · 耗时 {esc(res.get("elapsed"))}s</div></div>'
+     f'<div class="chx-chip{" dim" if not cached else ""}">'
+     f'{"已入库 · 无需重算" if cached else "实时计算"}</div>'
+     f'<div class="chx-price"><b class="{close_cls}">{close_txt}<small>{chg_html}</small></b>'
+     f'<span>最新收盘（不复权）· {esc(str(k.get("date", "")))}</span></div></div>'
+     '<div class="chx-strip">'
+     f'<div>信号数<b>{len(sigs)} 条</b></div>'
+     f'<div>可交易<b>{res.get("tradable_count", 0)} 条</b></div>'
+     f'<div>其中主信号<b>{res.get("primary_count", 0)} 条</b></div>'
+     '</div></div>')
+
 st.warning("**非投资建议**：本工具由程序按缠论规则自动生成结构化描述，"
            "不构成任何投资建议，不承诺收益，不含自动下单。据此操作风险自负。")
 
-k = res.get("kline") or {}
-stt = res.get("structure") or {}
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("最新收盘（不复权）", k.get("close_raw"))
-c2.metric("价格位置", stt.get("position", "—"))
-c3.metric("信号数", len(res.get("signals") or []))
-c4.metric("可交易", res.get("tradable_count", 0))
-c5.metric("其中主信号", res.get("primary_count", 0))
-
-st.divider()
+pos = stt.get("position", "—")
+html(metric_cards([
+    ("最新收盘（不复权）", close_txt, "", "前复权口径见下方图表说明", close_cls),
+    ("价格位置", pos, "", "中枢 / 分型综合判定",
+     "chx-cy" if pos and pos != "—" else "chx-dim"),
+    ("信号数", len(sigs), "条", "当前窗口内缠论买卖点", ""),
+    ("可交易", res.get("tradable_count", 0), "条", "F3 过滤后", ""),
+    ("其中主信号", res.get("primary_count", 0), "条", "同日多信号已归集", "chx-cy"),
+]))
 
 # ==================== 第 4 步：K 线可视化 ====================
-st.subheader("K 线与缠论标注")
+html(section("01", "K 线与缠论标注", f"{len(sigs)} 条信号 · 前复权"))
 df = load_ohlc(res["code"])
 if df.empty:
     st.info("无 K 线数据")
 else:
+    C = skin.chart_colors(is_night())
     fig = go.Figure()
     fig.add_trace(go.Candlestick(x=df["date"], open=df["open"], high=df["high"],
                                  low=df["low"], close=df["close"], name="K线",
-                                 increasing_line_color="#e2534b",
-                                 decreasing_line_color="#3ba272"))
+                                 increasing_line_color=C["up"], increasing_fillcolor=C["up"],
+                                 decreasing_line_color=C["down"], decreasing_fillcolor=C["down"]))
 
     for z in (stt.get("zs_list") or []):
         fig.add_shape(type="rect", x0=z["sdt"], x1=z["edt"], y0=z["zd"], y1=z["zg"],
-                      fillcolor="rgba(110,110,240,0.16)",
-                      line=dict(color="rgba(110,110,240,0.55)", width=1), layer="below")
+                      fillcolor="rgba(124,92,255,0.13)" if is_night() else "rgba(91,75,224,0.10)",
+                      line=dict(color=C["zs"], width=1), layer="below")
 
     bis = stt.get("bi_list") or []
     xs, ys = [], []
@@ -290,82 +454,147 @@ else:
         ys.append(p1)
     if xs:
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name="笔",
-                                 line=dict(color="#8a8a8a", width=1.2)))
+                                 line=dict(color=C["bi"], width=1.3)))
 
     fxs = stt.get("fx_list") or []
-    for tag, sym, color, name in (("顶", "triangle-down", "#d62728", "顶分型"),
-                                  ("底", "triangle-up", "#2ca02c", "底分型")):
+    for tag, sym, color, name in (("顶", "triangle-down", C["up"], "顶分型"),
+                                  ("底", "triangle-up", C["down"], "底分型")):
         pts = [f for f in fxs if tag in f["mark"]]
         if pts:
             fig.add_trace(go.Scatter(x=[f["dt"] for f in pts], y=[f["fx"] for f in pts],
                                      mode="markers", name=name,
-                                     marker=dict(symbol=sym, size=7, color=color, opacity=0.7)))
+                                     marker=dict(symbol=sym, size=8, color=color, opacity=0.85)))
 
     # 用位置索引：df 有名为 date 的列，r.date 会遮蔽 Timestamp.date() 方法
-    pos = {str(d.date()): i for i, d in enumerate(df["date"])}
-    for sg in (res.get("signals") or []):
-        i = pos.get(str(sg["date"]))
+    pos_i = {str(d.date()): i for i, d in enumerate(df["date"])}
+    for sg in sigs:
+        i = pos_i.get(str(sg["date"]))
         if i is None:
             continue
         row = df.iloc[i]
         is_buy = sg["direction"] == "买"
         y = float(row["low"]) * 0.985 if is_buy else float(row["high"]) * 1.015
+        color = C["buy"] if is_buy else C["sell"]
         fig.add_trace(go.Scatter(
             x=[row["date"]], y=[y], mode="markers+text",
             text=[LEVEL_TAG.get(sg["type"], sg["type"][:3])],
             textposition="bottom center" if is_buy else "top center",
+            textfont=dict(color=color, size=11),
             name=sg["type"], showlegend=False,
-            marker=dict(symbol="star", size=14,
-                        color="#1a9850" if is_buy else "#d62728",
-                        line=dict(color="white", width=0.8)),
+            marker=dict(symbol="star", size=16, color=color,
+                        line=dict(color=C["ring"], width=0.8)),
             hovertemplate=(f"{sg['date']} {sg['type']}<br>"
                            f"确认日 {sg.get('confirm_date') or '待确认'}<br>"
                            f"入场参考 {sg.get('entry_ref_price') or '-'}"
                            "<extra></extra>")))
 
-    fig.update_layout(height=580, xaxis_rangeslider_visible=False,
-                      margin=dict(l=8, r=8, t=28, b=8),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
-                      hovermode="x unified")
-    st.plotly_chart(fig, width="stretch")
-    st.caption("灰色折线 = 笔；蓝框 = 中枢；三角 = 分型；星标 = 买卖点（★绿=买 / ★红=卖）。"
+    fig.update_layout(height=560, xaxis_rangeslider_visible=False,
+                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                      font=dict(family=skin.MONO, size=11, color=C["axis"]),
+                      margin=dict(l=8, r=8, t=30, b=8),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0,
+                                  font=dict(color=C["axis"], size=11),
+                                  bgcolor="rgba(0,0,0,0)"),
+                      hovermode="x unified",
+                      xaxis=dict(gridcolor=C["grid"], linecolor=C["line"], zeroline=False,
+                                 showspikes=True, spikecolor=C["axis"], spikethickness=1),
+                      yaxis=dict(gridcolor=C["grid"], linecolor=C["line"], zeroline=False,
+                                 side="right"))
+    st.plotly_chart(fig, width="stretch", theme=None)
+    st.caption("灰色折线 = 笔；紫框 = 中枢；三角 = 分型；星标 = 买卖点（★青=买 / ★琥珀=卖）。"
                "价格为前复权口径，与「最新收盘（不复权）」在历史日期上会有差异。")
 
+# ==================== 公司基本面 ====================
+fin = res.get("fundamentals") or {}
+html(section("02", "公司基本面", fin.get("industry") or "暂无数据"))
+if not fin:
+    st.info("暂无基本面数据（接口不可用，或该股无记录）。")
+else:
+    _ry, _ny = fin.get("revenue_yoy"), fin.get("net_profit_yoy")
+    html(metric_cards([
+        ("PE (TTM)", fmt_num(fin.get("pe_ttm")), "", "静态 " + fmt_num(fin.get("pe_static")), "chx-cy"),
+        ("PB", fmt_num(fin.get("pb")), "", "市净率 · 腾讯快照", ""),
+        ("总市值", fmt_yi_plain(fin.get("total_cap_yi")), "", "亿元 · 腾讯快照", ""),
+        ("ROE", fmt_pct(fin.get("roe")), "", esc(fin.get("report_period") or "—"), ""),
+        ("营收同比", fmt_pct(_ry), "", "净利润同比 " + fmt_pct(_ny),
+         "chx-up" if (_ry or 0) >= 0 else "chx-down"),
+    ]))
+
+    prof_rows = [
+        ["所属行业", esc(fin.get("industry") or "—")
+         + (f'（{esc(fin.get("market"))}）' if fin.get("market") else "")],
+        ["中证行业分类", esc(fin.get("industry_cninfo") or "—")],
+        ["上市日期", esc(fin.get("listing_date") or "—")],
+    ]
+    if fin.get("main_business"):
+        prof_rows.append(["主营业务", f'<span class="txt">{esc(fin["main_business"])}</span>'])
+    html(table(["项目", "内容"], prof_rows))
+
+    hist = fin.get("history") or []
+    if hist:
+        hrows = []
+        for h in hist:
+            ry, ny = h.get("revenue_yoy"), h.get("net_profit_yoy")
+            hrows.append([
+                esc(h.get("report_period")), fmt_yi(h.get("revenue")),
+                f'<span class="{"chx-up" if (ry or 0) >= 0 else "chx-down"}">{fmt_pct(ry)}</span>',
+                fmt_yi(h.get("net_profit")),
+                f'<span class="{"chx-up" if (ny or 0) >= 0 else "chx-down"}">{fmt_pct(ny)}</span>',
+                fmt_pct(h.get("roe")),
+            ])
+        html(table(["报告期", "营业总收入", "同比", "净利润", "同比", "ROE"], hrows,
+                   "数据源：巨潮（公司概况 / 行业）+ 同花顺（财务摘要）+ 腾讯（估值快照）。"
+                   "基本面只用于交代背景，不参与信号过滤与回测 —— 财报有披露滞后，"
+                   "用最新财报评估历史信号会造成前视偏差（ADR-017）。"))
+    if fin.get("errors"):
+        st.caption("部分基本面数据获取失败：" + "；".join(fin["errors"]))
+
 # ==================== 信号明细 ====================
-st.subheader("信号明细")
-sigs = res.get("signals") or []
+html(section("03", "信号明细", f"{len(sigs)} 条 · 按信号日倒序"))
 if sigs:
-    tb = pd.DataFrame([{
-        "信号日": x["date"], "确认日": x.get("confirm_date") or "待确认",
-        "类型": x["type"], "入场参考价": x.get("entry_ref_price"),
-        "可交易": "是" if x["is_tradable"] else "否",
-        "主信号": "★" if x.get("is_primary") else "",
-        "过滤": x.get("filter_codes") or "通过",
-        "理由": x.get("reason", ""),
-    } for x in sigs[::-1]])
-    st.dataframe(tb, width="stretch", hide_index=True)
-    st.caption("信号日 = 触发笔结束日；确认日 = 信号日 + 实测确认延迟"
-               "（缠论「笔」需后续 K 线确认，见 ADR-011，通常 1~2 个交易日）")
+    rows = []
+    for x in sigs[::-1]:
+        is_buy = x["direction"] == "买"
+        tag = f'<span class="tag {"buy" if is_buy else "sell"}">{esc(x["type"])}</span>'
+        tradable = ('<span class="tag ok">是</span>' if x["is_tradable"]
+                    else '<span class="tag no">否</span>')
+        star = '<span class="star">★</span>' if x.get("is_primary") else ""
+        filt = esc(x.get("filter_codes") or "通过")
+        if filt != "通过":
+            filt = f'<span class="tag warn">{filt}</span>'
+        if x.get("confirm_date"):
+            confirm = esc(x["confirm_date"])
+        else:
+            confirm = '<span class="tag warn">待确认</span>'
+        price = x.get("entry_ref_price")
+        price = f"{float(price):.2f}" if price else "—"
+        rows.append([esc(x["date"]), confirm, tag, price, tradable, star, filt,
+                     f'<span class="txt">{esc(x.get("reason", ""))}</span>'])
+    html(table(["信号日", "确认日", "类型", "入场参考价", "可交易", "主信号", "过滤", "理由"],
+               rows,
+               "信号日 = 触发笔结束日；确认日 = 信号日 + 实测确认延迟"
+               "（缠论「笔」需后续 K 线确认，见 ADR-011，通常 1~2 个交易日）"))
 else:
     st.info("该股票在当前窗口内没有缠论买卖点信号。")
 
 # ==================== 回测统计 ====================
-st.subheader("回测统计参考")
+html(section("04", "回测统计参考", "双口径 · 5 / 10 / 20 日"))
 bt = res.get("backtest") or []
 if bt:
-    tb2 = pd.DataFrame([{
-        "类型": b["signal_type"], "窗口": f"{b['window']}日", "样本": b["n"],
-        "平均收益": f"{b['avg_return']:+.2%}", "胜率": f"{b['win_rate']:.1%}",
-        "平均最大回撤": f"{b['avg_mdd']:.2%}",
-    } for b in bt])
-    st.dataframe(tb2, width="stretch", hide_index=True)
-    st.caption("口径：入场 = 确认日次一交易日开盘；卖点收益已做方向调整"
-               "（价格下跌记为正）。样本少时不具解释力。")
+    rows = []
+    for b in bt:
+        r = b["avg_return"]
+        rows.append([esc(b["signal_type"]), f'{b["window"]}日', b["n"],
+                     f'<span class="{"chx-up" if r >= 0 else "chx-down"}">{r:+.2%}</span>',
+                     f'{b["win_rate"]:.1%}', f'{abs(b["avg_mdd"]):.2%}'])
+    html(table(["类型", "窗口", "样本", "平均收益", "胜率", "平均最大回撤"], rows,
+               "口径：入场 = 确认日次一交易日开盘；卖点收益已做方向调整"
+               "（价格下跌记为正）。样本少时不具解释力。"))
 else:
     st.info("无回测数据。")
 
 # ==================== 第 5 步：LLM 按需生成 ====================
-st.subheader("AI 总结")
+html(section("05", "AI 总结", "按需生成 · 失败自动降级为规则结果"))
 llm = res.get("llm") or {}
 has_text = bool(llm.get("text"))
 col_btn, col_info = st.columns([1, 4])
@@ -378,16 +607,20 @@ if col_btn.button("生成 AI 总结", disabled=has_text, width="stretch"):
 col_info.caption("规则结果无需 LLM 即可使用；AI 总结只做解释与归纳，失败会自动降级。")
 
 if has_text:
+    html('<div class="chx-card chx-ai">')
     st.markdown(llm["text"])
     st.caption(f"模型 {llm.get('model', '')} · token {llm.get('tokens', 0)}"
                f" · 费用 ¥{llm.get('cost', 0):.6f} · 缓存 {'是' if llm.get('cached') else '否'}")
+    html("</div>")
 elif llm.get("error"):
     st.warning(f"生成失败，已降级为仅规则结果：{llm['error']}")
 else:
     st.caption("尚未生成。")
 
-with st.expander("查看原始结构化数据（analyze_stock 的返回）"):
+# ==================== 原始数据 ====================
+html(section("06", "原始结构化数据", "analyze_stock 返回"))
+with st.expander("展开查看 JSON", expanded=False):
     st.json(res, expanded=False)
 
-st.divider()
-st.caption("本页面由程序自动生成，非投资建议。")
+html('<div class="chx-footline">本页面由程序自动生成 · 非投资建议 · 不含自动下单 · '
+     '数据来源：本地 Parquet + SQLite</div>')

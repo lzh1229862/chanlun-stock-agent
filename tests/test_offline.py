@@ -16,8 +16,13 @@ if ROOT not in sys.path:
 import akshare as ak
 import pandas as pd
 
+import re
+
+import skin
 import analyzer
+import fundamentals
 import signal_filter
+import storage_fundamental
 import storage_kline as sk
 import watchlist_store
 
@@ -205,5 +210,175 @@ class TestWatchlistStore(unittest.TestCase):
         self.assertEqual(report_builder.load_watchlist(), watchlist_store.load_watchlist())
 
 
+class TestFundamentals(unittest.TestCase):
+    """基本面解析与格式化（离线，纯函数）。"""
+
+    def test_parse_num_units(self):
+        self.assertEqual(fundamentals.parse_num("272.43亿"), 27243000000.0)
+        self.assertEqual(fundamentals.parse_num("5,123.4万"), 51234000.0)
+        self.assertEqual(fundamentals.parse_num("21.7600"), 21.76)
+
+    def test_wanyi_matched_before_yi(self):
+        # "万亿" 必须排在 "亿" 之前匹配，否则 1.2万亿 会被解析成 1.2亿
+        self.assertEqual(fundamentals.parse_num("1.2万亿"), 1.2e12)
+
+    def test_percent_kept_as_percent(self):
+        self.assertEqual(fundamentals.parse_num("1.47%"), 1.47)
+
+    def test_parse_num_blank_and_junk(self):
+        for v in (None, False, True, "", "  ", "nan", "None", "abc", "--"):
+            self.assertIsNone(fundamentals.parse_num(v), repr(v))
+
+    def test_tx_idx_verified_anchors(self):
+        """这三个下标当初是用财务数据反算校验过的，改动必须显式意识到。"""
+        self.assertEqual(fundamentals.TX_IDX["pe_ttm"], 39)
+        self.assertEqual(fundamentals.TX_IDX["pb"], 46)
+        self.assertEqual(fundamentals.TX_IDX["total_cap_yi"], 45)
+        self.assertTrue(all(isinstance(i, int) and i > 0
+                            for i in fundamentals.TX_IDX.values()))
+
+    def test_summarize_empty_is_safe(self):
+        s = fundamentals.summarize({})
+        self.assertEqual(s["errors"], [])
+        self.assertEqual(s["history"], [])
+        self.assertIsNone(s["pe_ttm"])
+        self.assertEqual(fundamentals.format_lines(s), [])
+
+    def test_summarize_takes_newest_period(self):
+        s = fundamentals.summarize({"financials": [
+            {"report_period": "2026-06-30", "net_profit": 4.45e10, "roe": 16.75},
+            {"report_period": "2026-03-31", "net_profit": 2.72e10, "roe": 10.57}]})
+        self.assertEqual(s["report_period"], "2026-06-30")
+        self.assertEqual(len(s["history"]), 2)
+
+    def test_format_lines_contains_key_facts(self):
+        s = fundamentals.summarize({
+            "profile": {"industry": "白酒", "listing_date": "2001-08-27"},
+            "valuation": {"pe_ttm": 19.3, "pb": 6.25, "total_cap_yi": 15715.03}})
+        txt = "\n".join(fundamentals.format_lines(s))
+        self.assertIn("白酒", txt)
+        self.assertIn("19.30", txt)
+        self.assertIn("2001-08-27", txt)
+
+    def test_formatters_handle_none(self):
+        self.assertEqual(fundamentals.fmt_num(None), "—")
+        self.assertEqual(fundamentals.fmt_pct(None), "—")
+        self.assertEqual(fundamentals.fmt_yi(None), "—")
+        self.assertEqual(fundamentals.fmt_yi(2.7243e10), "272.43亿")
+        self.assertEqual(fundamentals.fmt_yi_plain(15715.03), "15715.03亿")
+
+
+class TestStorageFundamental(unittest.TestCase):
+    """基本面缓存读写（用临时库，不碰真实 data/chan_agent.db）。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._saved = storage_fundamental.DB_PATH
+        storage_fundamental.DB_PATH = Path(self._tmp.name) / "t.db"
+
+    def tearDown(self):
+        storage_fundamental.DB_PATH = self._saved
+        self._tmp.cleanup()
+
+    def test_stale_rules(self):
+        self.assertTrue(storage_fundamental.is_stale(None, 7))
+        self.assertTrue(storage_fundamental.is_stale("垃圾值", 7))
+        self.assertFalse(storage_fundamental.is_stale(storage_fundamental.now_str(), 7))
+        self.assertTrue(storage_fundamental.is_stale("2020-01-01 00:00:00", 7))
+
+    def test_financials_roundtrip_newest_first(self):
+        storage_fundamental.save_financials("600519", [
+            {"report_period": "2026-03-31", "net_profit": 1.0, "roe": 10.0},
+            {"report_period": "2026-06-30", "net_profit": 2.0, "roe": 16.0}])
+        rows = storage_fundamental.load_financials("600519")
+        self.assertEqual([r["report_period"] for r in rows], ["2026-06-30", "2026-03-31"])
+        self.assertEqual(rows[0]["net_profit"], 2.0)
+        self.assertTrue(rows[0]["updated_at"])
+
+    def test_save_financials_is_upsert(self):
+        """同一报告期重复写不能变成两行（靠 (code, report_period) 主键 + upsert）。"""
+        storage_fundamental.save_financials("600519", [{"report_period": "2026-06-30", "roe": 1.0}])
+        storage_fundamental.save_financials("600519", [{"report_period": "2026-06-30", "roe": 2.0}])
+        rows = storage_fundamental.load_financials("600519")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["roe"], 2.0)
+
+    def test_profile_roundtrip_and_upsert(self):
+        self.assertIsNone(storage_fundamental.load_profile("600519"))
+        storage_fundamental.save_profile({"code": "600519", "name": "贵州茅台", "industry": "白酒"})
+        self.assertEqual(storage_fundamental.load_profile("600519")["industry"], "白酒")
+        storage_fundamental.save_profile({"code": "600519", "name": "贵州茅台", "industry": "酿酒"})
+        self.assertEqual(storage_fundamental.load_profile("600519")["industry"], "酿酒")
+
+    def test_missing_code_returns_empty(self):
+        self.assertEqual(storage_fundamental.load_financials("000000"), [])
+        self.assertIsNone(storage_fundamental.load_profile("000000"))
+
+    def test_get_fundamentals_never_raises_when_all_sources_down(self):
+        saved = (fundamentals.fetch_profile, fundamentals.fetch_financials,
+                 fundamentals.fetch_valuation)
+
+        def boom(*a, **k):
+            raise ConnectionError("断网")
+
+        fundamentals.fetch_profile = boom
+        fundamentals.fetch_financials = boom
+        fundamentals.fetch_valuation = boom
+        try:
+            r = fundamentals.get_fundamentals("600519", refresh=True)
+        finally:
+            (fundamentals.fetch_profile, fundamentals.fetch_financials,
+             fundamentals.fetch_valuation) = saved
+        self.assertEqual(r["financials"], [])
+        self.assertIsNone(r["valuation"])
+        self.assertEqual(len(r["errors"]), 3, "三个数据源失败都应记进 errors 而不是抛出")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestAppBoots(unittest.TestCase):
+    """app.py 能渲染出首屏（不联网、不点分析）。
+
+    这层是 CI 之前完全没有覆盖的：compileall 只查语法，查不出运行期的渲染错误
+    （比如 metric_cards 传错元组长度、f-string 里引用了不存在的变量）。
+    """
+
+    def test_first_screen_renders_without_exception(self):
+        from streamlit.testing.v1 import AppTest
+        at = AppTest.from_file(str(Path(ROOT) / "app.py"))
+        at.run(timeout=120)
+        self.assertEqual([str(e.value) for e in at.exception], [])
+        self.assertEqual([r.label for r in at.sidebar.radio], ["模式"])
+        self.assertIn("单股分析", at.sidebar.radio[0].options)
+
+
+class TestSkin(unittest.TestCase):
+    """双皮肤：令牌完整性 + 图表配色（离线）。"""
+
+    def test_css_has_no_undefined_vars(self):
+        css = skin.build_css()
+        used = set(re.findall(r"var\\((--[a-z0-9-]+)\\)", css))
+        declared = set(re.findall(r"(--[a-z0-9-]+):", css))
+        self.assertEqual(sorted(used - declared), [], "CSS 引用了未声明的变量")
+
+    def test_both_palettes_emitted(self):
+        css = skin.build_css()
+        for key in ("bg", "card", "txt", "accent"):
+            self.assertIn(f"--{key}:{skin.DARK[key]}", css)
+            self.assertIn(f"--{key}:{skin.LIGHT[key]}", css)
+
+    def test_night_toggle_wired(self):
+        css = skin.build_css()
+        self.assertIn("input:checked", css)
+        self.assertIn(".st-key-chx_skin", css)
+        self.assertIn("prefers-color-scheme: light", css)
+
+    def test_chart_colors_differ(self):
+        night, day = skin.chart_colors(True), skin.chart_colors(False)
+        self.assertNotEqual(night["up"], day["up"])
+        self.assertNotEqual(night["bi"], day["bi"])
+        keys = {"up", "down", "bi", "zs", "buy", "sell", "grid", "axis", "line", "ring"}
+        for c in (night, day):
+            self.assertEqual(set(c), keys)

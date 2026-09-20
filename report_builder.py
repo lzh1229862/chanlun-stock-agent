@@ -34,6 +34,9 @@ from confirm_dates import load_frames
 from llm_client import MODEL as LLM_MODEL
 from llm_client import summarize as llm_summarize
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_zs
+from fundamentals import format_lines as fundamentals_lines
+from fundamentals import get_fundamentals
+from fundamentals import summarize as summarize_fundamentals
 from signal_filter import fetch_name, trading_calendar
 from storage_signal import query_signals
 
@@ -158,13 +161,15 @@ def render_overview(report_date, codes, all_, tradable, primary, pending):
 
 def render_watchlist_table(codes, by_code, names, llm_state):
     L = ["## 股票池概览", "",
-         "| 代码 | 名称 | 信号数 | 可交易 | 主信号 | 本次 LLM |",
-         "| --- | --- | --- | --- | --- | --- |"]
+         "| 代码 | 名称 | 行业 | 信号数 | 可交易 | 主信号 | 本次 LLM |",
+         "| --- | --- | --- | --- | --- | --- | --- |"]
     for c in codes:
         sigs = by_code.get(c, [])
         tr = sum(1 for s in sigs if s["is_tradable"])
         pr = sum(1 for s in sigs if s["is_primary"])
-        L.append(f"| {c} | {names.get(c, '')} | {len(sigs)} | {tr} | {pr} | {llm_state.get(c, '-')} |")
+        ind = (fundamentals_summary(c, names.get(c, "")).get("industry") or "-")
+        L.append(f"| {c} | {names.get(c, '')} | {ind} | {len(sigs)} | {tr} | {pr} "
+                 f"| {llm_state.get(c, '-')} |")
     L.append("")
     return "\n".join(L)
 
@@ -187,6 +192,28 @@ def render_staleness_alert(report_date, all_, cal):
         L += ["", "⚠️ 全部信号目前都处于**待确认**状态，暂不可作为操作依据。"]
     L.append("")
     return "\n".join(L)
+
+
+_FIN_CACHE = {}
+
+
+def fundamentals_summary(code, name=""):
+    """基本面摘要。带进程内缓存 —— 同一轮里 render_stock 和 build_payload 都要用，
+    不缓存会重复查库/重复联网（冷启动每只约 2 秒，之后命中 SQLite 缓存为 0）。"""
+    if code not in _FIN_CACHE:
+        try:
+            _FIN_CACHE[code] = summarize_fundamentals(get_fundamentals(code), name=name)
+        except Exception:
+            _FIN_CACHE[code] = {}
+    return _FIN_CACHE[code]
+
+
+def render_fundamentals(code, name=""):
+    """公司基本面段落。数据只用于交代背景，**不作为涨跌方向依据**（见 ADR-017）。"""
+    lines = fundamentals_lines(fundamentals_summary(code, name))
+    if not lines:
+        return "**公司基本面**\n\n- 暂无数据（接口不可用或该股无记录）\n"
+    return "**公司基本面**\n\n" + "\n".join(lines) + "\n"
 
 
 def render_structure(st):
@@ -311,7 +338,8 @@ def render_stock(code, name, sigs, report_date, cal, bt_stats, llm):
     L = [f"### {code} {name}".rstrip(), "",
          f"**规则结论**：{one_line_conclusion(st, sigs, report_date, cal)}", "",
          render_llm(llm),
-         render_structure(st)]
+         render_structure(st),
+         render_fundamentals(code, name)]
     if sigs:
         L.append(render_signals(sigs, report_date, cal))
         L.append(render_backtest_ref(sigs, bt_stats))
@@ -369,7 +397,9 @@ def build_payload(code, name, sigs, st, bt_stats, report_date):
     bt = [{"signal_type": t, "window": w, **v}
           for (scope, w, t), v in sorted(bt_stats.items())
           if scope == BACKTEST_SCOPE and t in types]
+    fin = fundamentals_lines(fundamentals_summary(code, name))
     return {"stock_code": code, "stock_name": name, "report_date": report_date,
+            "fundamentals": "\n".join(fin) if fin else "（无数据）",
             "structure": structure,
             "signals": [{"signal_date": s["signal_date"], "confirm_date": s["confirm_date"],
                          "entry_ref_price": s["entry_ref_price"], "signal_type": s["signal_type"],

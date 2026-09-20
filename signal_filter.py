@@ -129,21 +129,31 @@ def name_hit(name, keywords):
 
 # ==================== 数据获取 ====================
 
-_NAME_CACHE = {}
+_QUOTE_CACHE = {}
 _LISTING_CACHE = {}
 _CALENDAR = None
 
 
-def fetch_name(code):
-    """腾讯行情取证券简称（东财接口不可用）。"""
-    if code in _NAME_CACHE:
-        return _NAME_CACHE[code]
+def fetch_quote(code):
+    """腾讯行情原始字段（一串用 ~ 分隔的值）。
+
+    这一个请求里除了证券简称，还带着 PE / PB / 总市值 / 换手率 等估值字段 ——
+    以前解析完简称就把整包丢了。现在整包缓存下来给 fundamentals 复用，不额外联网。
+    字段下标见 fundamentals.TX_IDX（已用「TTM 净利 / 每股净资产 自己算一遍」交叉验证）。
+    """
+    if code in _QUOTE_CACHE:
+        return _QUOTE_CACHE[code]
     r = requests.get(QUOTE_URL.format(ts_code(code)), timeout=10)
     txt = r.content.decode("gbk", errors="replace")
     parts = txt.split('"')[1].split("~") if '"' in txt else []
-    name = parts[1] if len(parts) > 1 else ""
-    _NAME_CACHE[code] = name
-    return name
+    _QUOTE_CACHE[code] = parts
+    return parts
+
+
+def fetch_name(code):
+    """腾讯行情取证券简称（东财接口不可用）。"""
+    parts = fetch_quote(code)
+    return parts[1] if len(parts) > 1 else ""
 
 
 def fetch_listing_date(code):

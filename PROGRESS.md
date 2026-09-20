@@ -1,7 +1,7 @@
 # 项目进度（缠论股票分析 Agent）
 
 > 需求见 [`docs/PRD.md`](docs/PRD.md)，关键技术决策见 [`docs/技术决策记录.md`](docs/技术决策记录.md)。
-> 最后更新：2026-09-19
+> 最后更新：2026-09-20
 
 ## 已完成
 
@@ -12,6 +12,8 @@
 | 第 3 轮 | 加存储 | `storage_kline.py` / `storage_signal.py` / `run_round3.py` |
 | 第 4~6 轮 | 过滤 / 回测 / 报告 / LLM / 编排 / 定时任务 | `signal_filter.py` / `backtest.py` / `report_builder.py` / `llm_client.py` / `agent_graph.py` / `main.py` |
 | 第 7 轮 | Web UI + 公共分析函数 + 数据兜底 | `app.py` / `run_ui.bat` / `analyzer.py` / `verify_fallback.py` |
+| 第 8 轮 | 科技风双皮肤界面（含 run_ui 启动修复） | `skin.py` / `.streamlit/config.toml` / `docs/design/`（静态稿） |
+| 第 9 轮 | 基本面字段用起来（行业分类 / 财务摘要 / 估值快照） | `fundamentals.py` / `storage_fundamental.py`（ADR-017） |
 
 ## 当前状态
 
@@ -28,6 +30,19 @@
 - **量能过滤**：F3.4 三条可选规则（susp/illiquid/volspike），默认关；配置在 config/settings.yaml
 - **定时任务**：scripts/install_schedule.bat 注册 ChanAgentDaily（周一至周五 18:05，非交易日自动跳过）
 - **Web UI**：app.py（Streamlit）搜索/分析/历史优先/K线标注/AI 按需；双击 run_ui.bat 启动 http://localhost:8501
+- **修复**：`.streamlit/config.toml` 里误留的 `headless = true` 会让 `run_ui.bat` 只打印地址、不打开浏览器
+  （表现为"双击 run_ui.bat 没反应"）；已改为 `headless = false`，并用打桩实测确认 Streamlit 确实调用了
+  `webbrowser.open`（`true` 时压根不调）。排查三步写进 README「配置」一节
+- **双皮肤界面**（T8）：`skin.py` 提供白天 / 夜晚两套配色令牌 + 全局样式；侧边栏左下角 🌙/☀️ 开关切换，
+  靠 `.stApp:has(开关:checked)` 纯 CSS 联动（不弹窗、不闪白），会话内记忆；
+  图表色随皮肤切换（`skin.chart_colors`）；原生组件基调由 `.streamlit/config.toml` 的 `[theme]` 定；
+  版式统一成「头部带 + 读数卡 + 01/02/03 编号分节 + 等宽数字」；离线单测 +4 项（共 27 项）守住令牌完整性
+- **基本面**（T9 / ADR-017）：`fundamentals.py` 取行业分类（中证四级）+ 财务摘要（近 6 期）+ 估值快照
+  （PE / PB / 市值 / 换手率），缓存进 `storage_fundamental.py` 的 profiles / fundamentals 两表；
+  数据源走巨潮 + 同花顺 + 腾讯，**全部绕开东财**（东财在本机被服务端重置，同 ADR-001）；
+  腾讯估值来自 `fetch_quote` 缓存的整包行情（88 字段），**不额外联网**，字段下标用财务数据反算校验过；
+  单股页新增「02 公司基本面」分节，报告每只股票加一段，LLM 提示词加 `{{fundamentals}}` + 硬约束 #9；
+  **不进过滤与回测**（财报披露滞后，会造成前视偏差）；离线单测 +16 项（共 43 项）
 - **公共分析函数**：analyzer.py 提供 analyze_stock / load_from_db / generate_llm_summary / load_ohlc，CLI 与 UI 共用
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
 - **数据兜底**（T7-1b / ADR-015）：`analyzer.ensure_kline` 统一取数 —— 本地最新则走缓存（0 次网络请求）、缺失或过期则自动增量拉取、失败则返回结构化错误不抛异常；

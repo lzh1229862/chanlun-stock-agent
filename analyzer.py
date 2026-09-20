@@ -100,6 +100,19 @@ def _payload(result):
     }
 
 
+def _safe_fundamentals(code, name=""):
+    """基本面摘要（行业 / 财务摘要 / 估值快照）。取不到就返回 None，绝不影响主流程。
+
+    只用于展示与 LLM 上下文，**不参与过滤与回测** —— 财报有披露滞后，
+    拿最新财报评估历史信号会引入前视偏差（ADR-017）。
+    """
+    try:
+        from fundamentals import get_fundamentals, summarize
+        return summarize(get_fundamentals(code), name=name)
+    except Exception:
+        return None
+
+
 def _expected_last_trading_day(trade_date):
     """返回 <= trade_date 的最后一个交易日（判断本地数据是否最新用）。
 
@@ -214,6 +227,7 @@ def _analyze_impl(code, trade_date, use_llm=True, verbose=False, allow_fetch=Tru
 
     structure, zss, bis = _structure(code, q)
     out["structure"] = structure
+    out["fundamentals"] = _safe_fundamentals(code, name)
     out["kline"] = {
         "rows": len(raw), "start": str(raw["date"].iloc[0].date()),
         "end": str(raw["date"].iloc[-1].date()),
@@ -330,6 +344,7 @@ def load_from_db(code, date=None):
                         "close_raw": round(float(raw["close"].iloc[-1]), 4),
                         "close_qfq": round(float(q["close"].iloc[-1]), 4),
                         "path": str(parquet_path(code))}
+        out["fundamentals"] = _safe_fundamentals(code, name)
 
     rows.sort(key=lambda x: x["signal_date"])
     sigs = [{

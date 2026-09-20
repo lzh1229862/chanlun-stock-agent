@@ -1,0 +1,21 @@
+# 缠论分析 Agent - UI theme
+# Dark is the engineering baseline (night UI); the day UI is driven by the
+# CSS variable layer in skin.py. Native widgets (select popover, calendar,
+# dataframe canvas) inherit the base below.
+[theme]
+base = "dark"
+primaryColor = "#22D3EE"
+backgroundColor = "#0A101E"
+secondaryBackgroundColor = "#111A2E"
+font = "sans-serif"
+
+[client]
+# minimal: 顶部菜单只留最少项；皮肤切换由侧边栏左下角开关负责
+toolbarMode = "minimal"
+
+[server]
+# 关键：false 才会在启动后自动打开浏览器（run_ui.bat 依赖这条）
+headless = false
+
+[browser]
+gatherUsageStats = false
