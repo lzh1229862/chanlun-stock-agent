@@ -408,6 +408,50 @@ class TestVerifyEdge(unittest.TestCase):
         self.assertEqual(bt.direction_of("第一类买点"), 1)
         self.assertEqual(bt.direction_of("第三类卖点"), -1)
 
+    def test_split_point_counts_distinct_dates(self):
+        rows = [{"entry_date": d} for d in
+                ["2026-01-01", "2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"]]
+        # 去重后 4 个日期，下标 int(4*0.6)=2 -> 切在第三个日期
+        self.assertEqual(self.ve.split_point(rows, 0.6), "2026-01-03")
+
+    def test_split_point_never_returns_last_date(self):
+        """切分点必须留得下验证期，否则后 40% 是空的。"""
+        rows = [{"entry_date": d} for d in ["2026-01-01", "2026-01-02", "2026-01-03"]]
+        self.assertNotEqual(self.ve.split_point(rows, 0.99), "2026-01-03")
+        self.assertIsNone(self.ve.split_point([{"entry_date": "2026-01-01"}], 0.6))
+
+    def test_partition_keeps_cut_in_observation(self):
+        rows = [{"entry_date": d} for d in ["2026-01-01", "2026-01-05", "2026-01-09"]]
+        a, b = self.ve.partition(rows, "2026-01-05")
+        self.assertEqual([r["entry_date"] for r in a], ["2026-01-01", "2026-01-05"])
+        self.assertEqual([r["entry_date"] for r in b], ["2026-01-09"])
+
+    def test_assign_blocks_monotonic_and_clamped(self):
+        rows = [{"entry_date": d} for d in
+                ["2026-01-01", "2026-01-11", "2026-01-21", "2026-01-31"]]
+        idx = self.ve.assign_blocks(rows, 4)
+        got = [idx[i] for i in range(4)]
+        self.assertEqual(got, sorted(got))
+        self.assertEqual(got[0], 0)
+        self.assertEqual(got[-1], 3, "最后一天必须落进最后一段，不能越界")
+
+    def test_assign_blocks_degenerate_inputs(self):
+        rows = [{"entry_date": "2026-01-01"}] * 3
+        self.assertEqual(set(self.ve.assign_blocks(rows, 1).values()), {0})
+        self.assertEqual(set(self.ve.assign_blocks(rows, 5).values()), {0},
+                         "可选日期比段数还少时全部落第 1 段，不能崩")
+
+    def test_judge_rules(self):
+        s = {"n": 100, "exc": 0.01, "exc_lo": 0.001, "exc_hi": 0.02, "net": 0.008}
+        self.assertEqual(self.ve.judge(s, 0.002, 30), "✓ 正超额")
+        self.assertEqual(self.ve.judge(dict(s, n=10), 0.002, 30), "⚠ 样本不足")
+        self.assertEqual(self.ve.judge(dict(s, exc_lo=-0.001), 0.002, 30), "超额不显著")
+        self.assertEqual(self.ve.judge(dict(s, net=-0.001), 0.002, 30), "扣费后为负")
+        self.assertEqual(self.ve.judge(None, 0.002, 30), "—")
+
+    def test_stats_for_empty_is_none(self):
+        self.assertIsNone(self.ve.stats_for([], 5, 0.002))
+
 
 class TestAppBoots(unittest.TestCase):
     """app.py 能渲染出首屏（不联网、不点分析）。
