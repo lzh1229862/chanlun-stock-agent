@@ -338,6 +338,77 @@ if __name__ == "__main__":
     unittest.main(verbosity=2)
 
 
+class TestVerifyEdge(unittest.TestCase):
+    """有效性对照里的统计计算（离线，纯函数）。
+
+    这是「测量工具」，算错了比没有更糟 —— 所以每个公式都用已知值钉死。
+    """
+
+    def setUp(self):
+        import verify_edge
+        self.ve = verify_edge
+
+    def test_t_crit_table(self):
+        self.assertAlmostEqual(self.ve.t_crit(1), 12.706, places=3)
+        self.assertAlmostEqual(self.ve.t_crit(30), 2.042, places=3)
+        self.assertEqual(self.ve.t_crit(200), 1.96)
+
+    def test_mean_ci_known_value(self):
+        m, lo, hi = self.ve.mean_ci([1, 2, 3, 4, 5])
+        self.assertAlmostEqual(m, 3.0)
+        self.assertAlmostEqual(lo, 1.0371, places=3)
+        self.assertAlmostEqual(hi, 4.9629, places=3)
+
+    def test_mean_ci_tiny_samples(self):
+        self.assertEqual(self.ve.mean_ci([]), (None, None, None))
+        self.assertEqual(self.ve.mean_ci([0.5]), (0.5, None, None))
+
+    def test_wilson_known_values(self):
+        lo, hi = self.ve.wilson(5, 10)
+        self.assertAlmostEqual(lo, 0.2366, places=3)
+        self.assertAlmostEqual(hi, 0.7634, places=3)
+        lo, hi = self.ve.wilson(10, 10)
+        self.assertAlmostEqual(hi, 1.0, places=6)
+        self.assertLess(lo, 1.0)
+        self.assertAlmostEqual(self.ve.wilson(0, 10)[0], 0.0, places=6)
+
+    def test_profit_factor(self):
+        self.assertAlmostEqual(self.ve.profit_factor([0.1, -0.05, 0.2, -0.15]), 1.5, places=6)
+        self.assertEqual(self.ve.profit_factor([0.1, 0.2]), float("inf"))
+        self.assertEqual(self.ve.profit_factor([-0.1]), 0.0)
+
+    def test_max_losing_streak_sorts_by_date(self):
+        rows = [("2026-01-01", 1), ("2026-01-02", 0), ("2026-01-03", 0),
+                ("2026-01-04", 0), ("2026-01-05", 1)]
+        self.assertEqual(self.ve.max_losing_streak(rows), 3)
+        self.assertEqual(self.ve.max_losing_streak(list(reversed(rows))), 3)
+
+    def test_quantile_endpoints(self):
+        self.assertEqual(self.ve.quantile([1, 2, 3, 4, 5], 0.0), 1.0)
+        self.assertEqual(self.ve.quantile([1, 2, 3, 4, 5], 0.5), 3.0)
+        self.assertEqual(self.ve.quantile([1, 2, 3, 4, 5], 1.0), 5.0)
+
+    def test_cost_per_round_trip(self):
+        class A:
+            commission, stamp, transfer, slippage = 0.00025, 0.0005, 0.00001, 0.0005
+        self.assertAlmostEqual(self.ve.cost_per_round_trip(A), 0.00202, places=8)
+
+    def test_zero_cost_gives_zero(self):
+        class A:
+            commission = stamp = transfer = slippage = 0.0
+        self.assertEqual(self.ve.cost_per_round_trip(A), 0.0)
+
+    def test_type_order_pairs_buy_sell(self):
+        got = self.ve.all_types([{"signal_type": t} for t in
+                                 ["第三类卖点", "第一类买点", "第二类买点", "第一类卖点"]])
+        self.assertEqual(got, ["第一类买点", "第一类卖点", "第二类买点", "第三类卖点"])
+
+    def test_direction_follows_type(self):
+        import backtest as bt
+        self.assertEqual(bt.direction_of("第一类买点"), 1)
+        self.assertEqual(bt.direction_of("第三类卖点"), -1)
+
+
 class TestAppBoots(unittest.TestCase):
     """app.py 能渲染出首屏（不联网、不点分析）。
 

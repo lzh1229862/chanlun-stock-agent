@@ -286,11 +286,43 @@ python verify_akshare.py      # 数据源连通性与字段
 python verify_deepseek.py     # LLM 连通性（需要 DEEPSEEK_API_KEY）
 python verify_fallback.py     # 数据兜底 22 项断言
 python verify_fallback.py --offline   # 跳过需要联网的用例
+python verify_edge.py         # 信号有效性对照（基准 / 成本 / 置信区间 / 分布）
 ```
 
 `verify_fallback.py` 会自己备份 → 删掉本地 Parquet → 调 `analyze_stock` → 检查是否自动拉回 → 模拟断网 → 最后还原原文件，跑完数据不会丢。
 
-除此之外还有一套**完全离线**的单元测试（不联网、不需要本地行情数据，0.3 秒跑完）：
+### `verify_edge.py`：信号到底有没有超出「随机入场」
+
+**这是看任何胜率数字之前必须先跑的一个脚本。** 它回答：信号之后的收益，比「同一只股票随便哪天入场」好多少？
+
+为什么需要它 —— 实测发现 12 只样本股的 **5 日无条件平均收益本身就是 +0.12% ~ +1.49%**。
+也就是说「信号后平均 +0.96%」里有一大半是市场给的（beta），不是缠论规则给的。不扣掉这个基准，
+任何「胜率提升」都可能只是行情变了。
+
+输出四件事：
+
+| 输出 | 含义 |
+| --- | --- |
+| **超额收益** | 信号均值 − 同股票同期无条件基准均值 |
+| **扣费净值** | 扣掉佣金 / 印花税 / 过户费 / 滑点之后还剩多少（5 日窗口往返约 0.2%） |
+| **置信区间** | 均值用 t 区间、胜率用 Wilson 区间；样本不足直接标 ⚠ |
+| **收益分布** | 盈亏比 / 最大连续亏损 / 最差 5% 分位 |
+
+```bash
+python verify_edge.py                       # 默认 signal 口径、5/10/20 日
+python verify_edge.py --window 5            # 只看 5 日
+python verify_edge.py --scope day           # 换按交易日口径
+python verify_edge.py --zero-cost           # 不计任何交易成本
+python verify_edge.py --slippage 0.001      # 单边滑点 0.1%
+```
+
+**它不改动任何分析逻辑**，只读 `backtest` 表 + 本地 Parquet，入场口径与回测完全一致
+（复用 `backtest.evaluate`，确认日次一交易日开盘）。
+
+> ⚠️ 目前**没有做市场状态分层**。样本期（2024-11 ~ 2026-09）整体上行，买点会系统性好看。
+> 也**不是策略有效性证据**，只用于判断「这次改动到底有没有用」。
+
+除此之外还有一套**完全离线**的单元测试（不联网、不需要本地行情数据，1.5 秒跑完，54 项）：
 
 ```bash
 python -m unittest discover -s tests -v
@@ -304,6 +336,9 @@ python -m unittest discover -s tests -v
 | `TestEnsureKline` | 无数据 + 无网络 → 返回 `(None, 原因)`；日历取不到 + 本地有数据 → 判 `cache` 不联网 |
 | `TestStorageKline` | Parquet 路径 / 代码前缀 / 缺失文件读成空表 |
 | `TestModulesImport` | 12 个业务模块全部可 import（挡语法错、循环依赖、依赖缺失） |
+| `TestFundamentals` / `TestStorageFundamental` | 基本面单位解析（`1.2万亿` 必须从长到短匹配）、缓存 upsert、三个数据源全挂也不抛异常 |
+| `TestVerifyEdge` | 有效性对照里的统计公式：t 临界值、Wilson 区间、盈亏比、最大连亏、成本模型（**测量工具算错比没有更糟**） |
+| `TestAppBoots` / `TestSkin` | app.py 能渲染出首屏；双皮肤令牌完整、混搭配色齐全 |
 
 ---
 
