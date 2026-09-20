@@ -261,7 +261,7 @@ run_ui.bat
 
 ## 关键设计（ADR 摘要）
 
-完整决策记录见 [`docs/技术决策记录.md`](docs/技术决策记录.md)，共 20 条。
+完整决策记录见 [`docs/技术决策记录.md`](docs/技术决策记录.md)，共 21 条。
 
 | 编号 | 决策 | 结论 |
 | --- | --- | --- |
@@ -281,6 +281,7 @@ run_ui.bat
 | 018 | 指数与市场状态 | 指数单独存 `data/index/`；MA200 + 动量分三档；**真 alpha = 方向调整后收益 − 指数收益** |
 | 019 | 历史扩到 11 年 | 下行样本 5.5% → **29.3%**；**四个结论被推翻**（含撤回「砍掉第三类卖点」） |
 | 020 | 去偏验证 | 随机抽 40 只 → **规则在随机股上一样有效**（6 类差值 CI 全跨 0） |
+| 021 | LLM 提假设 + 数据裁决 | 预注册 / 多重比较 / 分半三道闸门；6 条假设只 1 条成立 |
 
 其中 ADR-011 / ADR-012 是本项目比较特别的地方：**信号日当天往往还不知道信号成立**，因为笔的成立要靠后续 K 线确认。所以回测入场统一取「确认日的次一交易日开盘」，而不是「信号日收盘」。
 
@@ -298,6 +299,8 @@ python verify_edge.py         # 信号有效性对照（基准 / 成本 / 置信
 python verify_robustness.py all   # 参数敏感性 + 信号稳定性（证伪用）
 python verify_level.py        # 级别共振：日线信号 × 周线状态
 python verify_edge.py --regime  # 按市场状态分层 + 相对沪深300 的真 alpha
+python verify_hypotheses.py gen   # 让 LLM 提假设并预注册（需要 DEEPSEEK_API_KEY）
+python verify_hypotheses.py test  # 用数据裁决预注册的假设
 ```
 
 `verify_fallback.py` 会自己备份 → 删掉本地 Parquet → 调 `analyze_stock` → 检查是否自动拉回 → 模拟断网 → 最后还原原文件，跑完数据不会丢。

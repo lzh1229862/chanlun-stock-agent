@@ -732,6 +732,80 @@ class TestVerifyLevel(unittest.TestCase):
         self.assertIsNone(self.vl.group_of("W1 周线笔同向", None, 1))
 
 
+class TestVerifyHypotheses(unittest.TestCase):
+    """假设工具里的纯函数（离线）。
+
+    重点是 match 的边界与 validate 的拦截能力 —— 后者挡住 LLM 编造特征名。
+    """
+
+    def setUp(self):
+        import verify_hypotheses
+        self.vh = verify_hypotheses
+
+    def test_match_numeric_ops(self):
+        row = {"v": 1.5}
+        for op, t, want in ((">=", 1.5, True), (">", 1.5, False), (">", 1.4, True),
+                            ("<=", 1.5, True), ("<", 1.5, False), ("<", 1.6, True)):
+            self.assertEqual(self.vh.match(row, [{"feature": "v", "op": op, "threshold": t}]),
+                             want, "%s %s" % (op, t))
+
+    def test_match_categorical_in(self):
+        row = {"position": "中枢上方"}
+        self.assertTrue(self.vh.match(row, [{"feature": "position", "in": ["中枢上方"]}]))
+        self.assertFalse(self.vh.match(row, [{"feature": "position", "in": ["中枢下方"]}]))
+
+    def test_match_is_and_across_conditions(self):
+        row = {"position": "中枢上方", "bi_pct": 0.2}
+        cond = [{"feature": "position", "in": ["中枢上方"]}, {"feature": "bi_pct", "op": ">=", "threshold": 0.13}]
+        self.assertTrue(self.vh.match(row, cond))
+        self.assertFalse(self.vh.match(dict(row, bi_pct=0.05), cond))
+
+    def test_match_treats_nan_as_no_match(self):
+        """缺失值不能当成满足条件 —— 否则会把「没数据」算进实验组。"""
+        for bad in (None, float("nan")):
+            self.assertFalse(self.vh.match({"v": bad}, [{"feature": "v", "op": ">=", "threshold": 0}]))
+
+    def test_extract_json_handles_fences(self):
+        self.assertEqual(self.vh.extract_json('["a"]'), ["a"])
+        self.assertEqual(self.vh.extract_json('\n```json\n["a"]\n```\n'), ["a"])
+        self.assertEqual(self.vh.extract_json('说明文字 [{"id":"H1"}] 结尾'), [{"id": "H1"}])
+
+    def test_extract_json_raises_without_array(self):
+        with self.assertRaises(ValueError):
+            self.vh.extract_json("没有数组")
+
+    def test_validate_accepts_well_formed(self):
+        good = [{"id": "H1", "hypothesis": "x", "theory": "y", "predict": "high",
+                 "when": [{"feature": "vol_ratio_20", "op": ">=", "threshold": 1.5}]},
+                {"id": "H2", "hypothesis": "x", "theory": "y", "predict": "low",
+                 "when": [{"feature": "position", "in": ["中枢上方"]}]}]
+        self.assertEqual(self.vh.validate(good), [])
+
+    def test_validate_rejects_unknown_feature(self):
+        bad = [{"id": "H1", "hypothesis": "x", "theory": "y", "predict": "high",
+                "when": [{"feature": "macd", "op": ">=", "threshold": 1}]}]
+        self.assertTrue(any("未知特征" in e for e in self.vh.validate(bad)))
+
+    def test_validate_rejects_bad_op_and_missing_threshold(self):
+        bad = [{"id": "H1", "hypothesis": "x", "theory": "y", "predict": "high",
+                "when": [{"feature": "vol_ratio_20", "op": "≈", "threshold": 1}]},
+               {"id": "H2", "hypothesis": "x", "theory": "y", "predict": "high",
+                "when": [{"feature": "vol_ratio_20", "op": ">="}]}]
+        errs = self.vh.validate(bad)
+        self.assertTrue(any("op 非法" in e for e in errs))
+        self.assertTrue(any("缺 threshold" in e for e in errs))
+
+    def test_validate_rejects_bad_predict_and_empty_when(self):
+        bad = [{"id": "H1", "hypothesis": "x", "theory": "y", "predict": "up", "when": []}]
+        errs = self.vh.validate(bad)
+        self.assertTrue(any("predict" in e for e in errs))
+        self.assertTrue(any("when" in e for e in errs))
+
+    def test_validate_rejects_missing_field(self):
+        errs = self.vh.validate([{"id": "H1", "when": [{"feature": "regime", "in": ["上行"]}]}])
+        self.assertTrue(any("缺字段" in e for e in errs))
+
+
 class TestAppBoots(unittest.TestCase):
     """app.py 能渲染出首屏（不联网、不点分析）。
 
