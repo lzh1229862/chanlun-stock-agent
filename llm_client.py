@@ -135,6 +135,16 @@ def _fmt_structure(st):
     return "\n".join(L)
 
 
+def _fmt_gap(s):
+    """H3 提示：距最近中枢结束的天数（ADR-021）。"""
+    g = s.get("zs_gap_days")
+    if g is None:
+        return ""
+    if g < 0:
+        return "距中枢：无中枢可参照"
+    return "距最近中枢结束 %d 个交易日%s" % (g, "（结构离得较远，历史超额偏低）" if g >= 10 else "")
+
+
 def _fmt_signals(sigs):
     if not sigs:
         return "（无信号）"
@@ -143,7 +153,8 @@ def _fmt_signals(sigs):
         f"确认日 {x.get('confirm_date') or '尚未确认'}，"
         f"入场参考价 {x.get('entry_ref_price')}，"
         f"{'可交易' if x['is_tradable'] else '不可交易'}，"
-        f"{'主信号' if x['is_primary'] else '次信号'}，理由：{x['signal_reason']}"
+        f"{'主信号' if x['is_primary'] else '次信号'}，"
+        f"{(_fmt_gap(x) + '，') if _fmt_gap(x) else ''}理由：{x['signal_reason']}"
         for x in sigs)
 
 
@@ -415,7 +426,8 @@ def build_payload_from_db(code="600519", report_date=None, max_signals=5):
 
     return {"stock_code": code, "stock_name": fetch_name(code), "report_date": report_date,
             "structure": structure,
-            "signals": [{"signal_date": s["signal_date"], "confirm_date": s["confirm_date"],
+            "signals": [{"zs_gap_days": s.get("zs_gap_days"),
+                         "signal_date": s["signal_date"], "confirm_date": s["confirm_date"],
                          "entry_ref_price": s["entry_ref_price"], "signal_type": s["signal_type"],
                          "is_tradable": s["is_tradable"], "is_primary": s["is_primary"],
                          "filter_version": s["filter_version"],

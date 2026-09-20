@@ -806,6 +806,56 @@ class TestVerifyHypotheses(unittest.TestCase):
         self.assertTrue(any("缺字段" in e for e in errs))
 
 
+class TestStructureGap(unittest.TestCase):
+    """H3 的距中枢结束天数（离线，纯函数）。
+
+    这个字段进了报告和 UI，标签写错会直接误导用户，所以单独钉住。
+    """
+
+    def setUp(self):
+        import structure_gap
+        self.sg = structure_gap
+
+    def test_note_of(self):
+        f = self.sg.note_of
+        self.assertEqual(f(None), "")
+        self.assertEqual(f(-1), "无中枢可参照")
+        self.assertIn("较近", f(0))
+        self.assertIn("较近", f(self.sg.GAP_THRESHOLD - 1))
+        self.assertIn("较远", f(self.sg.GAP_THRESHOLD))
+
+    def test_label_of(self):
+        f = self.sg.label_of
+        self.assertEqual(f(None), "—")
+        self.assertEqual(f(-1), "无中枢")
+        self.assertEqual(f(3), "3 日")
+        self.assertIn("⚠️", f(self.sg.GAP_THRESHOLD))
+
+    def test_threshold_is_ten(self):
+        """阈值来自 H3（ADR-021）。改它必须显式意识到会改动报告/UI 的提示口径。"""
+        self.assertEqual(self.sg.GAP_THRESHOLD, 10)
+
+    def test_annotate_writes_all_three_fields(self):
+        sigs = [{"date": "2026-01-05", "type": "第一类买点"},
+                {"date": "2026-01-06", "type": "第二类买点"},
+                {"date": "2026-01-07", "type": "第三类买点"}]
+        self.sg.annotate(sigs, {("2026-01-05", "第一类买点"): 3,
+                                ("2026-01-06", "第二类买点"): 15})
+        self.assertEqual(sigs[0]["zs_gap_days"], 3)
+        self.assertFalse(sigs[0]["zs_far"])
+        self.assertTrue(sigs[1]["zs_far"])
+        self.assertIn("较远", sigs[1]["zs_note"])
+        self.assertIsNone(sigs[2]["zs_gap_days"])
+        self.assertEqual(sigs[2]["zs_note"], "")
+
+    def test_fmt_gap_matches_threshold(self):
+        import llm_client
+        self.assertEqual(llm_client._fmt_gap({"zs_gap_days": None}), "")
+        self.assertIn("无中枢", llm_client._fmt_gap({"zs_gap_days": -1}))
+        self.assertNotIn("偏低", llm_client._fmt_gap({"zs_gap_days": 3}))
+        self.assertIn("偏低", llm_client._fmt_gap({"zs_gap_days": 10}))
+
+
 class TestAppBoots(unittest.TestCase):
     """app.py 能渲染出首屏（不联网、不点分析）。
 

@@ -21,6 +21,7 @@
 | 第 14 轮 | 历史扩到 11 年，四个结论被推翻 | `migrate_hist.py`（ADR-019） |
 | 第 15 轮 | 去偏验证：随机抽 40 只，规则是否只对知名股有效 | `backtest_chunk.py` / `config/sample40.json`（ADR-020） |
 | 第 16 轮 | LLM 提假设 + 数据裁决（预注册 / 多重比较 / 分半验证） | `signal_features.py` / `verify_hypotheses.py`（ADR-021） |
+| 第 17 轮 | 把唯一验证通过的 H3 接进产品 | `structure_gap.py` / `signals.zs_gap_days`（ADR-021 补记） |
 
 ## 当前状态
 
@@ -147,6 +148,19 @@
   - 提示词缺陷（下轮修）：漏把 `signal_type` 列进特征菜单 → H5/H6 文字说「买点」但条件没限制类型，
     实际测了全部六类。**本轮结果按预注册原样保留，不改**
   - 新增测试 +11 项（共 102 项）：`match` 四种操作符与 AND 语义、NaN 不算匹配、`extract_json` 去 fence、
+    `validate` 拦住编造特征名/非法操作符/缺字段
+- **H3 接进产品**（T17 / ADR-021 补记 / `structure_gap.py`）：H3 是唯一经得起三道闸门的发现，之前只躺在 ADR 里
+  - 接了 5 处：① `signals` 表加 `zs_gap_days` 列 ② `structure_gap.py` + `backfill_gaps`（排在 `backfill_confirm` 之后）
+    ③ analyzer 实时/读库两条路径 ④ 报告与 UI 的「距中枢」列 + ⚠️ 提示 ⑤ LLM 提示词硬约束 #10
+  - ⚠️ **差点踩进去的坑**：便宜版 B（全序列里「已结束」的最后一个中枢）与被验证的 A（确认日结构的最后一个中枢）
+    **只有 64.3% 一致**（903 条样本）—— A 会取到「正在形成、还没结束」的中枢（gap 常为 0）。
+    两者是两个量，若按直觉用 B 实现，接进产品的会是**另一个没被验证过的特征**且无人察觉
+  - 性能：现算 25ms/条 → `analyze_stock` 15.69s；改成**优先读库**（同一函数算的，数值一致）→ **11.83s**
+  - 顺带量出一个更大的问题：`analyze_stock` 的 11.83s 里 **`confirm_entry` 占 9.40s**、`build_context` 2.26s，
+    而 H3 已≈0 —— **9.4s 是 T14 扩到 11 年的副作用**，记为待办（UI 默认走 `load_from_db` 仍是 0.91s，不受影响）
+  - **没有改 `is_primary`**：它来自 ADR-010，改了会让前面 21 条 ADR 的全部数字静默失效。
+    做成**显式提示**（⚠️ 标记 + 报告说明 + LLM 上下文），人自己决定；要做成真权重必须单独一轮「改规则→重跑→重验」
+  - 新增测试 +5 项（共 107 项）：`note_of`/`label_of` 阈值边界、`annotate` 三字段、`GAP_THRESHOLD` 钉死、`_fmt_gap` 与阈值一致
     `validate` 拦住编造特征名/非法操作符/缺字段
 - **公共分析函数**：analyzer.py 提供 analyze_stock / load_from_db / generate_llm_summary / load_ohlc，CLI 与 UI 共用
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入

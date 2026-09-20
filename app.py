@@ -27,6 +27,7 @@ from analyzer import (analyze_stock, ensure_kline, generate_llm_summary, load_fr
                       load_ohlc)
 from fundamentals import fmt_num, fmt_pct, fmt_yi, fmt_yi_plain
 from storage_kline import load_kline
+from structure_gap import GAP_THRESHOLD
 from watchlist_store import (MAX_STOCKS, is_custom, load_default, load_watchlist,
                              parse_codes, reset_watchlist, save_watchlist, validate_codes)
 
@@ -568,12 +569,23 @@ if sigs:
             confirm = '<span class="tag warn">待确认</span>'
         price = x.get("entry_ref_price")
         price = f"{float(price):.2f}" if price else "—"
-        rows.append([esc(x["date"]), confirm, tag, price, tradable, star, filt,
+        # H3（ADR-021）：距最近中枢结束的交易日数，>=10 日的历史超额明显偏低
+        gap = x.get("zs_gap_days")
+        if gap is None:
+            gap_cell = "—"
+        elif gap < 0:
+            gap_cell = '<span class="tag">无中枢</span>'
+        elif gap >= GAP_THRESHOLD:
+            gap_cell = f'<span class="tag warn">⚠️ {gap} 日</span>'
+        else:
+            gap_cell = f"{gap} 日"
+        rows.append([esc(x["date"]), confirm, tag, gap_cell, price, tradable, star, filt,
                      f'<span class="txt">{esc(x.get("reason", ""))}</span>'])
-    html(table(["信号日", "确认日", "类型", "入场参考价", "可交易", "主信号", "过滤", "理由"],
+    html(table(["信号日", "确认日", "类型", "距中枢", "入场参考价", "可交易", "主信号", "过滤", "理由"],
                rows,
-               "信号日 = 触发笔结束日；确认日 = 信号日 + 实测确认延迟"
-               "（缠论「笔」需后续 K 线确认，见 ADR-011，通常 1~2 个交易日）"))
+               "信号日 = 触发笔结束日；确认日 = 信号日 + 实测确认延迟（ADR-011，通常 1~2 个交易日）；"
+               "距中枢 = 信号日距最近中枢结束的交易日数 —— 实测 ≥10 日的信号 5 日超额"
+               "从 +1.30% 降到 +0.73%（ADR-021），结构离得远、可靠性下降"))
 else:
     st.info("该股票在当前窗口内没有缠论买卖点信号。")
 

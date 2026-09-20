@@ -35,6 +35,7 @@ from llm_client import MODEL as LLM_MODEL
 from llm_client import summarize as llm_summarize
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_zs
 from fundamentals import format_lines as fundamentals_lines
+from structure_gap import GAP_THRESHOLD, label_of
 from fundamentals import get_fundamentals
 from fundamentals import summarize as summarize_fundamentals
 from signal_filter import fetch_name, trading_calendar
@@ -254,14 +255,22 @@ def render_llm(llm):
 def render_signals(sigs, report_date, cal):
     show = sigs[-MAX_SIGNALS_PER_STOCK:][::-1]
     L = [f"**信号明细**（最近 {len(show)} 条，按信号日倒序）", "",
-         "| 信号日 | 确认日 | 类型 | 入场参考价 | 时效 | 可交易 | 主信号 |",
-         "| --- | --- | --- | --- | --- | --- | --- |"]
+         "| 信号日 | 确认日 | 类型 | 入场参考价 | 时效 | 可交易 | 主信号 | 距中枢 |",
+         "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for s in show:
         label, _ = staleness(s, report_date, cal)
         L.append(f"| {s['signal_date']} | {s['confirm_date'] or '**待确认**'} | {s['signal_type']} | "
                  f"{num(s['entry_ref_price'])} | {label} | {'✅' if s['is_tradable'] else '❌'} | "
-                 f"{'★' if s['is_primary'] else ''} |")
+                 f"{'★' if s['is_primary'] else ''} | {label_of(s.get('zs_gap_days'))} |")
     L.append("")
+
+    far = [s for s in show if s.get("zs_gap_days") is not None
+           and s["zs_gap_days"] >= GAP_THRESHOLD]
+    if far:
+        L += [f"> ⚠️ 上表有 **{len(far)} 条信号距最近中枢结束已超过 {GAP_THRESHOLD} 个交易日**"
+              f"（{'、'.join(s['signal_date'] for s in far)}）。实测这类信号的 5 日超额"
+              f"从 +1.30% 降到 +0.73%（差值 −0.56%，95%CI 不跨 0，分半验证同向，见 ADR-021），"
+              f"**结构已经离得比较远，可靠性下降**。", ""]
 
     pend = [s for s in show if not s["confirm_date"]]
     if pend:

@@ -38,6 +38,7 @@ import pandas as pd
 
 from backtest import run_backtest, save_backtest
 from confirm_dates import backfill as backfill_confirm
+from structure_gap import backfill_gaps
 from confirm_dates import load_frames
 from mark_primary import decide_primary
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_signals, build_zs
@@ -305,6 +306,9 @@ def node_filter(state):
             apply_filter(code, [{"date": r["date"], "type": r["type"],
                                  "is_tradable": r["is_tradable"]} for r in results], "v1_f3")
             backfill_confirm(verbose=False)
+            # H3（ADR-021 补记）：确认日有了之后补「距中枢结束天数」。
+            # 必须排在 backfill_confirm 之后 —— 结构要读在确认日上。
+            backfill_gaps(verbose=False)
             decisions, _ = decide_primary(query_signals(code=code))
             set_primary(decisions)
             tradable[code] = [{**r, "is_primary": next(

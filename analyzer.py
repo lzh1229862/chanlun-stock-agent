@@ -33,6 +33,7 @@ from confirm_dates import confirm_entry, load_frames
 from mark_primary import decide_primary
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_signals, build_zs
 from signal_filter import board_of, build_context, fetch_name, filter_signals, limit_ratio
+from structure_gap import annotate as annotate_gap, note_of as gap_note, signal_gaps
 from storage_kline import load_kline, parquet_path, update_kline
 from storage_report import query_reports
 from storage_signal import query_signals
@@ -98,6 +99,29 @@ def _payload(result):
                     for r in (result.get("signals") or [])[-5:]],
         "backtest": result.get("backtest") or [],
     }
+
+
+def _gaps_with_db(code, sigs):
+    """H3 的距中枢结束天数：**优先读库里已算好的**，只有缺失的才现算。
+
+    现算要 25ms/条（每条在自己的确认日上重算一次结构），一只股票上百条就是 2.7 秒。
+    而库里那列是流水线「写入时算好」的（structure_gap.backfill_gaps），读是免费的。
+    两者用的是同一个函数，所以数值一致。
+    """
+    known = {}
+    try:
+        for r in query_signals(code=code):
+            g = r.get("zs_gap_days")
+            if g is not None:
+                known[(r["signal_date"], r["signal_type"])] = g
+    except Exception:
+        pass
+    need = [s for s in sigs if (s["date"], s["type"]) not in known]
+    if need:
+        known.update(signal_gaps(code, [
+            {"signal_date": s["date"], "signal_type": s["type"], "confirm_date": s["confirm_date"]}
+            for s in need]))
+    return {k: known.get(k) for k in [(s["date"], s["type"]) for s in sigs]}
 
 
 def _safe_fundamentals(code, name=""):
@@ -260,9 +284,13 @@ def _analyze_impl(code, trade_date, use_llm=True, verbose=False, allow_fetch=Tru
             "is_primary": pmap.get((r["date"], r["type"]), 0),
             "confirm_date": cd, "entry_ref_price": price, "backfill_note": note,
         })
+    # H3（ADR-021）：距最近中枢结束的天数。每条信号在**自己的确认日**上重算结构。
+    # 这是目前唯一经得起「预注册+多重比较+分半验证」三道闸门的发现，所以进产品。
+    annotate_gap(sigs, _gaps_with_db(code, sigs))
     out["signals"] = sigs
     out["tradable_count"] = sum(1 for s in sigs if s["is_tradable"])
     out["primary_count"] = sum(1 for s in sigs if s["is_primary"])
+    out["far_count"] = sum(1 for s in sigs if s.get("zs_far"))
 
     # 回测统计（读库，只取本次出现的类型）
     types = {s["type"] for s in sigs}
@@ -354,10 +382,15 @@ def load_from_db(code, date=None):
         "is_primary": r["is_primary"], "confirm_date": r["confirm_date"],
         "entry_ref_price": r["entry_ref_price"], "backfill_note": r.get("backfill_note") or "",
         "filter_version": r.get("filter_version"),
+        # H3 距中枢结束天数：**读库**（写入时已算好，见 structure_gap.backfill_gaps）
+        "zs_gap_days": r.get("zs_gap_days"),
+        "zs_note": gap_note(r.get("zs_gap_days")),
+        "zs_far": bool((r.get("zs_gap_days") or -1) >= 10),
     } for r in rows]
     out["signals"] = sigs
     out["tradable_count"] = sum(1 for s in sigs if s["is_tradable"])
     out["primary_count"] = sum(1 for s in sigs if s["is_primary"])
+    out["far_count"] = sum(1 for s in sigs if s.get("zs_far"))
 
     types = {s["type"] for s in sigs}
     agg = {}
