@@ -29,8 +29,10 @@ from fundamentals import fmt_num, fmt_pct, fmt_yi, fmt_yi_plain
 from storage_kline import load_kline
 from signal_score import label_of as score_label
 from structure_gap import GAP_THRESHOLD, label_of as gap_label
-from watchlist_store import (MAX_STOCKS, is_custom, load_default, load_watchlist,
-                             parse_codes, reset_watchlist, save_watchlist, validate_codes)
+from watchlist_store import (MAX_NAME_LEN, MAX_STOCKS, is_custom, load_default,
+                             load_pool_name, load_watchlist, normalize_name, parse_codes,
+                             reset_watchlist, save_pool_name, save_watchlist,
+                             validate_codes)
 
 LEVEL_TAG = {"第一类买点": "1买", "第二类买点": "2买", "第三类买点": "3买",
              "第一类卖点": "1卖", "第二类卖点": "2卖", "第三类卖点": "3卖"}
@@ -153,6 +155,45 @@ def warm_up(codes):
     return warmed, failed, rows
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def pool_names(codes):
+    """代码 -> 公司简称。取不到就退化成空串，**绝不因为网络问题把页面搞崩**。"""
+    from signal_filter import fetch_name
+    out = {}
+    for c in codes:
+        try:
+            out[c] = fetch_name(c) or ""
+        except Exception:
+            out[c] = ""
+    return out
+
+
+def pool_alerts(day=None):
+    """当日池内「已确认 + 可交易」的信号。
+
+    返回 (日期, 总条数, {代码: 条数})。
+    「当日」是**日历上的今天** —— 批处理 18:05 跑完后，当天确认的信号就会让红点亮起；
+    第二天自然消失（那就是一次通知，不是一个常驻状态）。
+    """
+    from contextlib import closing
+
+    from storage_signal import connect
+    d = str(day or date.today())
+    codes = load_watchlist()
+    if not codes:
+        return d, 0, {}
+    sql = ("SELECT stock_code, COUNT(*) FROM signals "
+           "WHERE confirm_date = ? AND is_tradable = 1 AND stock_code IN (%s) "
+           "GROUP BY stock_code" % ",".join("?" * len(codes)))
+    try:
+        with closing(connect()) as conn:
+            rows = list(conn.execute(sql, [d] + list(codes)))
+    except Exception:
+        return d, 0, {}
+    by = {r[0]: r[1] for r in rows}
+    return d, sum(by.values()), by
+
+
 def render_scan_page():
     """全市场买点（T18 / ADR-022）。只展示，不算回测/基本面/LLM；点一行跳单股分析。"""
     import market_scan as mscan
@@ -241,8 +282,35 @@ def render_pool_page():
          '<div>批处理<b>工作日 18:05</b></div>'
          '</div></div>')
 
-    html(section("01", "编辑股票池", "每行一个，或逗号 / 空格分隔"))
     ver = st.session_state.get("pool_ver", 0)
+    name_now = load_pool_name()
+    html(section("01", "股票池", f"当前名称：{esc(name_now)} · 上限 {MAX_STOCKS} 只"))
+
+    # —— 池名称（只改显示名，不影响批处理扫哪些股票）——
+    c1, c2 = st.columns([3, 1])
+    name_in = c1.text_input(
+        "池名称", value=name_now, max_chars=MAX_NAME_LEN, key=f"pool_name_{ver}",
+        help="只改这个池的显示名。保存后池会变成「自定义」（写进 "
+             "config/watchlist.local.yaml，不进版本库）")
+    nm_new = normalize_name(name_in)
+    if c2.button("保存名称", width="stretch", disabled=(nm_new == name_now)):
+        save_pool_name(nm_new)
+        st.session_state["pool_ver"] = ver + 1
+        st.session_state["pool_result"] = {"saved": load_watchlist(), "failed": [],
+                                           "rows": 0, "renamed": nm_new}
+        st.rerun()
+
+    # —— 池内清单：代码 + 公司名称 + 当日确认信号 ——
+    _names = pool_names(tuple(pool))
+    _ad, _an, _aby = pool_alerts()
+    html(table(["代码", "名称", "当日确认信号", "来源"],
+               [[esc(c), esc(_names.get(c) or "—"),
+                 (f'<span class="tag warn">{_aby[c]} 条</span>' if _aby.get(c) else "—"),
+                 "自定义" if custom else "仓库默认"] for c in pool],
+               f"共 {len(pool)} 只 · 「当日确认信号」= {_ad} 已确认且可交易的信号数"
+               + (f"（池内合计 {_an} 条）" if _an else "")))
+
+    st.caption("编辑池内容（每行一个，或逗号 / 空格分隔）")
     text = st.text_area("股票代码", value=chr(10).join(pool), height=200,
                         key=f"pool_text_{ver}",
                         help=f"每行一个，或用逗号/空格分隔；最多 {MAX_STOCKS} 只，6 位数字")
@@ -307,6 +375,8 @@ def render_pool_page():
     if info:
         if info.get("reset"):
             st.success(f"已恢复仓库默认池（{len(info['saved'])} 只）。")
+        elif info.get("renamed") and not info.get("failed"):
+            st.success(f"池名称已改为「{info['renamed']}」。")
         else:
             st.success(f"股票池已更新为 {len(info['saved'])} 只：" + "、".join(info["saved"]))
         if info["failed"]:
@@ -382,7 +452,19 @@ with st.sidebar:
                                            "scan": "全市场买点"}.get(
             st.query_params.get("page"), "单股分析")
     st.session_state.setdefault("code_input", "600519")
-    mode = st.radio("模式", _modes, key="mode_radio", label_visibility="collapsed")
+
+    # 当日池内有确认信号 -> 在「自选股与日报」这一项挂红点。
+    # 用 format_func 而不是改选项字符串：值保持干净，其它地方不用跟着解析后缀。
+    _alert_day, _alert_n, _alert_by = pool_alerts()
+
+    def _mode_label(m):
+        return (m + " 🔴") if (m == "自选股与日报" and _alert_n) else m
+
+    mode = st.radio("模式", _modes, key="mode_radio", format_func=_mode_label,
+                    label_visibility="collapsed")
+    if _alert_n:
+        st.caption(f"🔴 {_alert_day} 池内 **{_alert_n}** 条新确认信号"
+                   f"（{'、'.join(sorted(_alert_by))}）")
     st.divider()
 
     if mode == "单股分析":

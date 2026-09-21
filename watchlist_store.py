@@ -14,6 +14,8 @@ import yaml
 SETTINGS_PATH = Path("config/settings.yaml")
 LOCAL_PATH = Path("config/watchlist.local.yaml")
 MAX_STOCKS = 10
+DEFAULT_POOL_NAME = "自选股池"
+MAX_NAME_LEN = 24
 
 _HEADER = """# 自选股池 —— 由 Web UI「替换股票池」生成，不进版本库
 # 想恢复仓库默认值：删掉本文件，或在 UI 上点「恢复默认」
@@ -29,15 +31,47 @@ def load_default():
     return [str(c).strip() for c in (cfg.get("watchlist") or []) if str(c).strip()]
 
 
-def _read_local():
+def _read_local_cfg():
+    """读 local 文件的完整配置（含 name）。不存在或坏掉返回 None。"""
     if not LOCAL_PATH.exists():
         return None
     try:
         cfg = yaml.safe_load(LOCAL_PATH.read_text(encoding="utf-8")) or {}
     except Exception:
         return None
+    return cfg if isinstance(cfg, dict) else None
+
+
+def _read_settings():
+    if not SETTINGS_PATH.exists():
+        return {}
+    try:
+        return yaml.safe_load(SETTINGS_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _read_local():
+    cfg = _read_local_cfg()
+    if cfg is None:
+        return None
     codes = [str(c).strip() for c in (cfg.get("watchlist") or []) if str(c).strip()]
     return codes or None
+
+
+def load_pool_name():
+    """当前池名称：local 的 name 优先，其次 settings 的 pool_name，最后默认值。"""
+    cfg = _read_local_cfg()
+    if cfg and str(cfg.get("name") or "").strip():
+        return str(cfg["name"]).strip()[:MAX_NAME_LEN]
+    nm = str(_read_settings().get("pool_name") or "").strip()
+    return nm[:MAX_NAME_LEN] if nm else DEFAULT_POOL_NAME
+
+
+def normalize_name(name):
+    """池名称清洗：去空白、限长；空则回落默认名。"""
+    nm = " ".join(str(name or "").split())
+    return (nm or DEFAULT_POOL_NAME)[:MAX_NAME_LEN]
 
 
 def is_custom():
@@ -50,13 +84,26 @@ def load_watchlist():
     return _read_local() or load_default()
 
 
-def save_watchlist(codes):
-    """把股票池写到 config/watchlist.local.yaml，返回写入的代码列表。"""
+def save_watchlist(codes, name=None):
+    """把股票池（含名称）写到 config/watchlist.local.yaml，返回写入的代码列表。
+
+    注意：**只改代码时必须保留原名称** —— 这个文件是整份重写的，早期版本
+    会把用户设的池名称悄悄冲掉。name=None 表示「沿用当前名称」。
+    """
     codes = [str(c).strip() for c in codes if str(c).strip()]
+    nm = normalize_name(name) if name is not None else load_pool_name()
     LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    body = yaml.safe_dump({"watchlist": codes}, allow_unicode=True, default_flow_style=False)
+    body = yaml.safe_dump({"name": nm, "watchlist": codes},
+                          allow_unicode=True, default_flow_style=False)
     LOCAL_PATH.write_text(_HEADER + "\n" + body, encoding="utf-8", newline="\n")
     return codes
+
+
+def save_pool_name(name):
+    """只改池名称（连同当前代码一起重写 local 文件）。返回清洗后的名称。"""
+    nm = normalize_name(name)
+    save_watchlist(load_watchlist(), name=nm)
+    return nm
 
 
 def reset_watchlist():

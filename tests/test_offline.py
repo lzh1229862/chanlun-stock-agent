@@ -890,6 +890,73 @@ class TestMarketScan(unittest.TestCase):
             self.assertFalse(self.ms.ok_code(bad, "测试"), repr(bad))
 
 
+SETTINGS_WITH_NAME = ('pool_name: "仓库样本池"' + chr(10)
+                      + 'watchlist:' + chr(10) + '  - "600519"' + chr(10))
+
+
+class TestPoolName(unittest.TestCase):
+    """股票池名称（UI 显示 + ADR 之外的补充功能）。
+
+    重点是那个必须钉住的回归点：**只改代码时不能把用户设的名称冲掉** ——
+    watchlist.local.yaml 是整份重写的，早期版本会静默丢名。
+    """
+
+    def setUp(self):
+        import watchlist_store as ws
+        self.ws = ws
+        self._tmp = tempfile.TemporaryDirectory()
+        self._saved = (ws.LOCAL_PATH, ws.SETTINGS_PATH)
+        ws.LOCAL_PATH = Path(self._tmp.name) / "watchlist.local.yaml"
+        ws.SETTINGS_PATH = Path(self._tmp.name) / "settings.yaml"
+
+    def tearDown(self):
+        self.ws.LOCAL_PATH, self.ws.SETTINGS_PATH = self._saved
+        self._tmp.cleanup()
+
+    def _settings(self, text):
+        self.ws.SETTINGS_PATH.write_text(text, encoding="utf-8")
+
+    def test_normalize_name(self):
+        f = self.ws.normalize_name
+        self.assertEqual(f("  我的  池 "), "我的 池")
+        self.assertEqual(f(""), self.ws.DEFAULT_POOL_NAME)
+        self.assertEqual(f(None), self.ws.DEFAULT_POOL_NAME)
+        self.assertEqual(f("   "), self.ws.DEFAULT_POOL_NAME)
+        self.assertEqual(len(f("x" * 100)), self.ws.MAX_NAME_LEN)
+
+    def test_name_falls_back_to_default(self):
+        self.assertEqual(self.ws.load_pool_name(), self.ws.DEFAULT_POOL_NAME)
+
+    def test_name_from_settings(self):
+        self._settings(SETTINGS_WITH_NAME)
+        self.assertEqual(self.ws.load_pool_name(), "仓库样本池")
+
+    def test_local_name_overrides_settings(self):
+        self._settings(SETTINGS_WITH_NAME)
+        self.ws.save_watchlist(["600519", "601318"], name="我的池")
+        self.assertEqual(self.ws.load_pool_name(), "我的池")
+
+    def test_saving_codes_keeps_existing_name(self):
+        """回归点：只改代码时名称必须保留。"""
+        self.ws.save_pool_name("我的池")
+        self.ws.save_watchlist(["600519", "601318"])
+        self.assertEqual(self.ws.load_pool_name(), "我的池")
+        self.assertEqual(self.ws.load_watchlist(), ["600519", "601318"])
+
+    def test_save_pool_name_only_changes_name(self):
+        self.ws.save_watchlist(["600519"])
+        self.ws.save_pool_name("新名字")
+        self.assertEqual(self.ws.load_pool_name(), "新名字")
+        self.assertEqual(self.ws.load_watchlist(), ["600519"])
+
+    def test_reset_restores_settings_name(self):
+        self._settings(SETTINGS_WITH_NAME)
+        self.ws.save_pool_name("临时名字")
+        self.assertEqual(self.ws.load_pool_name(), "临时名字")
+        self.ws.reset_watchlist()
+        self.assertEqual(self.ws.load_pool_name(), "仓库样本池")
+
+
 class TestSignalScore(unittest.TestCase):
     """排序打分（ADR-023/024）。它进了报告、UI 和 LLM 上下文，门槛写错会误导用户。"""
 

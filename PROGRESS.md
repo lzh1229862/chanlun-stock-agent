@@ -30,6 +30,19 @@
 | 第 23 轮 | 单因子 vs 组合的样本外对比 | verify_score_compare.py（ADR-026） |
 | 第 24 轮 | 幸存者偏差：退市股池 + 按日期判定 ST（选项 c） | delisted_pool.py / verify_survivorship.py（ADR-027，进行中） |
 
+- **股票池名称 + 公司名 + 当日信号红点**（T25）：
+  - watchlist_store 支持池名称：load_pool_name / save_pool_name / normalize_name（限长 24、空值回落默认）；
+    save_watchlist(codes, name=None) **只改代码时保留原名称** —— 这个文件是整份重写的，不修就会把用户设的名字静默冲掉（已写单测钉住）
+  - config/settings.yaml 加 pool_name: 技术样本池 作为仓库默认名
+  - 自选股页 section 01 顶部加「池名称」输入框 + 保存按钮；**池内清单表格显示 代码 / 公司名 / 当日确认信号 / 来源**
+    （公司名走 signal_filter.fetch_name，用 st.cache_data(ttl=1h) 缓存；取不到退化成「—」，不让网络问题崩页面）
+  - 侧边栏「自选股与日报」**当日池内有已确认且可交易的信号时挂红点**：
+    用 st.radio(format_func=...) 装饰标签（**值保持干净**，其它地方不用解析后缀）
+  - 「当日」= **日历上的今天**：批处理 18:05 跑完后当天亮起、第二天自然消失 —— 是一次通知，不是常驻状态
+  - 实测：池内 2026-09-18 有 4 条确认信号（五粮液 / 宁德时代 / 中信证券 / 金山办公），09-17、09-21 都是 0
+  - 新增测试 7 项（共 125 项）
+| 第 25 轮 | 股票池名称编辑 + 池内显示公司名 + 当日信号红点提醒 | watchlist_store 名称支持 / app.py（T25） |
+
 ## 当前状态
 
 - **数据**：600519 两年日线 487 行，存 `data/raw/600519.parquet`（不复权 + 复权因子，见 ADR-002）
