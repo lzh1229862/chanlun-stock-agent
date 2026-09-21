@@ -217,7 +217,7 @@ def load_merged():
     conn = __import__("storage_signal").connect()
     rows = [dict(r) for r in conn.execute(
         "SELECT stock_code, signal_date, signal_type, entry_date, exit_date, window, "
-        "return_pct, is_win FROM backtest WHERE scope='signal'")]
+        "return_pct, is_win, confirm_date FROM backtest WHERE scope='signal'")]
     conn.close()
     bt_df = pd.DataFrame(rows)
     m = feats.merge(bt_df, on=["stock_code", "signal_date", "signal_type"], how="inner")

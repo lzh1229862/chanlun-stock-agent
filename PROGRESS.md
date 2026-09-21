@@ -10,7 +10,6 @@
 | 第 1 轮 | 可行性验证 | `verify_akshare.py` / `verify_czsc.py` / `verify_deepseek.py` / `calib_zs.py` |
 | 第 2 轮 | 最小闭环 | `min_loop.py`（统一输出格式 + 信号映射） |
 | 第 3 轮 | 加存储 | `storage_kline.py` / `storage_signal.py` / `run_round3.py` |
-| 第 4~6 轮 | 过滤 / 回测 / 报告 / LLM / 编排 / 定时任务 | `signal_filter.py` / `backtest.py` / `report_builder.py` / `llm_client.py` / `agent_graph.py` / `main.py` |
 | 第 7 轮 | Web UI + 公共分析函数 + 数据兜底 | `app.py` / `run_ui.bat` / `analyzer.py` / `verify_fallback.py` |
 | 第 8 轮 | 科技风双皮肤界面（含 run_ui 启动修复） | `skin.py` / `.streamlit/config.toml` / `docs/design/`（静态稿） |
 | 第 9 轮 | 基本面字段用起来（行业分类 / 财务摘要 / 估值快照） | `fundamentals.py` / `storage_fundamental.py`（ADR-017） |
@@ -25,9 +24,7 @@
 | 第 18 轮 | 全市场买点扫描器 + UI 第三模式 | `market_scan.py`（ADR-022） |
 | 第 19 轮 | 第 2 轮假设 + H3/H4 敏感性 + 排序打分 | `signal_score.py`（ADR-023） |
 | 第 20 轮 | 打分的**时间样本外验证**（训练 15-20 / 检验 21-26） | `verify_score.py`（ADR-024） |
-| 第 17 轮 | 把唯一验证通过的 H3 接进产品 | `structure_gap.py` / `signals.zs_gap_days`（ADR-021 补记） |
-| 第 18 轮 | 全市场买点扫描器 + UI 第三个模式（点行跳单股） | `market_scan.py`（ADR-022） |
-| 第 19 轮 | 第 2 轮假设（5条全灭）+ H3/H4 敏感性 + 第一个排序打分 | `signal_score.py`（ADR-023） |
+| 第 21 轮 | 60 分钟级别共振验证 | `storage_minute.py` / `verify_minute.py`（ADR-025） |
 
 ## 当前状态
 
@@ -212,6 +209,20 @@
     都落在附近、各档为正且无符号反转 → 阈值不是精挑出来的
   - ⚠️ 仍有一层污染：阈值**数值**来自全样本（含检验期）。完全干净的样本外需要没看过的数据段，本项目没有
   - UI 免责声明随之更新（不再标「探索性」，改为「样本内乐观 30%」+「不是收益率」）
+- **60 分钟级别共振验证**（T21 / ADR-025 / `storage_minute.py` + `verify_minute.py`）：
+  - ⚠️ **数据源硬限制**：新浪 `stock_zh_a_minute` **固定只给最近 1970 根** → 60 分钟 ≈ **2 年**（492 个交易日），
+    `period=30` 行数还是 1970 只把起点推到 2025-09 —— **历史深度不可协商**，这决定了本轮的天花板
+  - 两个数据处理坑：**最后一根是盘中未完成 bar、OHLC 全 NaN**（不丢 czsc 会吃 NaN）；时间戳带时刻，
+    「信号日 D 的状态」要取 `time <= D 15:00` 的最后一根
+  - 做法：45 只 / **760 条日线信号**（2024-12 ~ 2026-09）；60 分钟状态 = 确认日 15:00 的最后一笔方向；需 240 根预热
+  - **结果：三窗口 CI 全跨 0 → 不显著**（+0.56% / +0.70% / +0.79%）
+  - ⭐ **但出现一个值得单独记的模式**：三窗口**分半全部「前半正、后半负」**（+2.20/−0.94、+2.51/−0.88、+4.41/−2.43），
+    **与 ADR-023 的 R1（缩量买点）完全同型** —— 两个不同因子同一种衰减模式。本轮只记录不解释
+  - 与 ADR-019（周线同向**显著为负**）并列：**「多级别共振」在日线信号上目前没有任何正向证据**
+  - 顺带修：`verify_hypotheses.load_merged` 的 SELECT 漏了 `confirm_date`（60 分钟状态要用它定位时点）
+  - 顺带修：README 的 ADR 索引表**重复了 022/023 两行、漏了 007/008/009/013**；
+    PROGRESS 轮次表**重复了第 17/18 轮** —— 均改为「按编号去重 + 排序 / 从文档索引同步」
+
     `validate` 拦住编造特征名/非法操作符/缺字段
 - **公共分析函数**：analyzer.py 提供 analyze_stock / load_from_db / generate_llm_summary / load_ohlc，CLI 与 UI 共用
 - **一键流程**：`python run_round3.py`，约 1 秒；重复运行不重复拉取、不重复插入
