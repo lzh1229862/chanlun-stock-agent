@@ -26,6 +26,7 @@
 import time
 from datetime import date, datetime
 
+import pandas as pd
 import requests
 
 from signal_filter import trading_calendar
@@ -149,11 +150,14 @@ def merge_last_bars(codes, verbose=True):
         if pc and lc and abs(pc - lc) / lc > 0.002:
             stat["deferred"] += 1          # 除权除息 -> 因子要重算
             continue
-        row = {"date": bar["dt"].normalize(), "open": bar["open"], "high": bar["high"],
+        # bar["dt"] 是 datetime.strptime 出来的 datetime，不是 pandas Timestamp ——
+        # .normalize() 只有 Timestamp 才有。这条路径要**收盘后真的补 K 线**才走到，
+        # 之前所有测试都在盘中（守卫直接跳过），所以一直没暴露。
+        row = {"date": pd.Timestamp(bar["dt"]).normalize(),
+               "open": bar["open"], "high": bar["high"],
                "low": bar["low"], "close": bar["close"], "volume": bar["volume"] or 0.0,
                "amount": bar["amount"] or 0.0,
                "qfq_factor": float(local["qfq_factor"].iloc[-1])}
-        import pandas as pd
         merged = pd.concat([local[COLUMNS], pd.DataFrame([row])], ignore_index=True)
         save_kline(code, merged)
         stat["appended"] += 1

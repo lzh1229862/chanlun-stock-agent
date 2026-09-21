@@ -121,13 +121,33 @@ def surv_progress():
     return (1 if (fresh and upstream_done) else 0), 1
 
 
-def surv_run():
+def child_env():
+    """子进程必须显式带 UTF-8，否则 Windows 默认用 GBK 写 stdout ——
+    文本里只要有 U+2212（真减号）、emoji 之类的字符就会 UnicodeEncodeError 崩掉。
+    直接跑脚本时没暴露，是因为我自己在 shell 里 export 了 PYTHONIOENCODING=utf-8。"""
+    import os
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+def run_child(args, timeout=None):
+    """跑一个子进程并回传 stdout/stderr —— 失败时**必须把 stderr 带出来**，
+    否则队列只报一个退出码，等于没有诊断信息。"""
     import subprocess
-    r = subprocess.run([sys.executable, "verify_survivorship.py", "--limit", "0"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-    print(r.stdout[-2000:] if r.stdout else "")
+    r = subprocess.run([sys.executable] + args, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", env=child_env(),
+                       timeout=timeout)
+    print((r.stdout or "")[-3000:])
     if r.returncode != 0:
-        raise RuntimeError("verify_survivorship 返回 %d：%s" % (r.returncode, r.stderr[-300:]))
+        tail = (r.stderr or "").strip().splitlines()
+        raise RuntimeError("退出码 %d" % r.returncode + chr(10) + chr(10).join(tail[-12:]))
+    return r
+
+
+def surv_run():
+    run_child(["verify_survivorship.py", "--limit", "0"], timeout=1800)
 
 
 def daily_progress():
@@ -136,13 +156,8 @@ def daily_progress():
 
 
 def daily_run():
-    import subprocess
-    r = subprocess.run([sys.executable, "main.py", "--date", date.today().isoformat(),
-                        "--no-llm"], capture_output=True, text=True, encoding="utf-8",
-                       errors="replace")
-    print((r.stdout or "")[-2000:])
-    if r.returncode != 0:
-        raise RuntimeError("main.py 返回 %d" % r.returncode)
+    run_child(["main.py", "--date", date.today().isoformat(), "--no-llm"],
+              timeout=3600)
 
 
 TASKS = [
