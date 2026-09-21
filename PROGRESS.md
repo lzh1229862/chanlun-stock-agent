@@ -10,6 +10,7 @@
 | 第 1 轮 | 可行性验证 | `verify_akshare.py` / `verify_czsc.py` / `verify_deepseek.py` / `calib_zs.py` |
 | 第 2 轮 | 最小闭环 | `min_loop.py`（统一输出格式 + 信号映射） |
 | 第 3 轮 | 加存储 | `storage_kline.py` / `storage_signal.py` / `run_round3.py` |
+| 第 4~6 轮 | 过滤 / 回测 / 报告 / LLM / 编排 / 定时任务 | `signal_filter.py` / `backtest.py` / `report_builder.py` / `llm_client.py` / `agent_graph.py` / `main.py` |
 | 第 7 轮 | Web UI + 公共分析函数 + 数据兜底 | `app.py` / `run_ui.bat` / `analyzer.py` / `verify_fallback.py` |
 | 第 8 轮 | 科技风双皮肤界面（含 run_ui 启动修复） | `skin.py` / `.streamlit/config.toml` / `docs/design/`（静态稿） |
 | 第 9 轮 | 基本面字段用起来（行业分类 / 财务摘要 / 估值快照） | `fundamentals.py` / `storage_fundamental.py`（ADR-017） |
@@ -25,6 +26,7 @@
 | 第 19 轮 | 第 2 轮假设 + H3/H4 敏感性 + 排序打分 | `signal_score.py`（ADR-023） |
 | 第 20 轮 | 打分的**时间样本外验证**（训练 15-20 / 检验 21-26） | `verify_score.py`（ADR-024） |
 | 第 21 轮 | 60 分钟级别共振验证 | `storage_minute.py` / `verify_minute.py`（ADR-025） |
+| 第 22 轮 | 打分接进单股路径（signals 表加 zs_width_pct）+ 修一个逐因子判定的真 bug | ADR-024 补记（T22） |
 
 ## 当前状态
 

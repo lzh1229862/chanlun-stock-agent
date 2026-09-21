@@ -35,6 +35,8 @@ from llm_client import MODEL as LLM_MODEL
 from llm_client import summarize as llm_summarize
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_zs
 from fundamentals import format_lines as fundamentals_lines
+import signal_score as sc
+from signal_score import label_of as score_label
 from structure_gap import GAP_THRESHOLD, label_of
 from fundamentals import get_fundamentals
 from fundamentals import summarize as summarize_fundamentals
@@ -255,13 +257,16 @@ def render_llm(llm):
 def render_signals(sigs, report_date, cal):
     show = sigs[-MAX_SIGNALS_PER_STOCK:][::-1]
     L = [f"**信号明细**（最近 {len(show)} 条，按信号日倒序）", "",
-         "| 信号日 | 确认日 | 类型 | 入场参考价 | 时效 | 可交易 | 主信号 | 距中枢 |",
-         "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+         "| 信号日 | 确认日 | 类型 | 入场参考价 | 时效 | 可交易 | 主信号 | 距中枢 | 打分 |",
+         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for s in show:
         label, _ = staleness(s, report_date, cal)
         L.append(f"| {s['signal_date']} | {s['confirm_date'] or '**待确认**'} | {s['signal_type']} | "
                  f"{num(s['entry_ref_price'])} | {label} | {'✅' if s['is_tradable'] else '❌'} | "
-                 f"{'★' if s['is_primary'] else ''} | {label_of(s.get('zs_gap_days'))} |")
+                 f"{'★' if s['is_primary'] else ''} | {label_of(s.get('zs_gap_days'))} | "
+                 # 报告拿的是**原始库行**（只有 width / gap，没有 zs_score），
+                 # 所以这里当场算，不依赖上游算好。
+                 f"{score_label(sc.score_of(s.get('zs_width_pct'), s.get('zs_gap_days')))} |")
     L.append("")
 
     far = [s for s in show if s.get("zs_gap_days") is not None

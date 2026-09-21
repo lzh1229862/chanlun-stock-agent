@@ -890,6 +890,57 @@ class TestMarketScan(unittest.TestCase):
             self.assertFalse(self.ms.ok_code(bad, "测试"), repr(bad))
 
 
+class TestSignalScore(unittest.TestCase):
+    """排序打分（ADR-023/024）。它进了报告、UI 和 LLM 上下文，门槛写错会误导用户。"""
+
+    def setUp(self):
+        import signal_score
+        self.ss = signal_score
+
+    def test_two_flags(self):
+        f = self.ss.score_of
+        self.assertEqual(f(0.20, 2), 2)
+        self.assertEqual(f(0.20, 12), 1)
+        self.assertEqual(f(0.05, 2), 1)
+        self.assertEqual(f(0.05, 12), 0)
+
+    def test_thresholds_are_inclusive(self):
+        f = self.ss.score_of
+        self.assertEqual(f(self.ss.W_THR, 0), 2)          # 宽度恰好等于阈值 -> 得分
+        self.assertEqual(f(0.20, self.ss.G_THR), 1)       # 距中枢恰好等于阈值 -> 不得分
+
+    def test_missing_factor_contributes_zero(self):
+        """**缺数据的那个因子**记 0 分 —— 不能因为「不知道」就给正面评价。
+
+        注意是「每个因子」不是「总分」：宽度未知、但距中枢确实很近时，
+        距中枢这一分照样要拿（(None, 3) -> 1）。
+        """
+        f = self.ss.score_of
+        self.assertEqual(f(None, 3), 1, "宽度未知只丢宽度那一分")
+        self.assertEqual(f(0.2, None), 1, "距中枢未知只丢距中枢那一分")
+        self.assertEqual(f(None, None), 0, "两个都未知 -> 0")
+        self.assertEqual(f("x", 3), 1, "脏数据同未知")
+        self.assertEqual(f(0.2, "x"), 1, "脏数据同未知")
+
+    def test_negative_gap_does_not_score(self):
+        """-1 是「无中枢可参照」的哨兵值，不能当成「离得很近」。"""
+        self.assertEqual(self.ss.score_of(0.2, -1), 1)
+
+    def test_labels(self):
+        self.assertEqual(self.ss.label_of(2), "★★")
+        self.assertEqual(self.ss.label_of(1), "★")
+        self.assertEqual(self.ss.label_of(0), "—")
+
+    def test_annotate_sets_score(self):
+        import structure_gap
+        sigs = [{"date": "2026-01-05", "type": "第一类买点"},
+                {"date": "2026-01-06", "type": "第一类买点"}]
+        structure_gap.annotate(sigs, {("2026-01-05", "第一类买点"): {"gap": 2, "width": 0.2},
+                                      ("2026-01-06", "第一类买点"): {"gap": 20, "width": 0.01}})
+        self.assertEqual(sigs[0]["zs_score"], 2)
+        self.assertEqual(sigs[1]["zs_score"], 0)
+
+
 class TestAppBoots(unittest.TestCase):
     """app.py 能渲染出首屏（不联网、不点分析）。
 

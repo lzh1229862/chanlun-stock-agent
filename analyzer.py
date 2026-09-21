@@ -33,7 +33,9 @@ from confirm_dates import confirm_entry, load_frames
 from mark_primary import decide_primary
 from min_loop import MAX_BI_NUM, MIN_BI_LEN, build_signals, build_zs
 from signal_filter import board_of, build_context, fetch_name, filter_signals, limit_ratio
-from structure_gap import annotate as annotate_gap, note_of as gap_note, signal_gaps
+from structure_gap import (annotate as annotate_gap, note_of as gap_note,
+                           signal_gap_width)
+import signal_score as sc
 from storage_kline import load_kline, parquet_path, update_kline
 from storage_report import query_reports
 from storage_signal import query_signals
@@ -113,12 +115,13 @@ def _gaps_with_db(code, sigs):
         for r in query_signals(code=code):
             g = r.get("zs_gap_days")
             if g is not None:
-                known[(r["signal_date"], r["signal_type"])] = g
+                known[(r["signal_date"], r["signal_type"])] = {
+                    "gap": g, "width": r.get("zs_width_pct")}
     except Exception:
         pass
     need = [s for s in sigs if (s["date"], s["type"]) not in known]
     if need:
-        known.update(signal_gaps(code, [
+        known.update(signal_gap_width(code, [
             {"signal_date": s["date"], "signal_type": s["type"], "confirm_date": s["confirm_date"]}
             for s in need]))
     return {k: known.get(k) for k in [(s["date"], s["type"]) for s in sigs]}
@@ -384,8 +387,10 @@ def load_from_db(code, date=None):
         "filter_version": r.get("filter_version"),
         # H3 距中枢结束天数：**读库**（写入时已算好，见 structure_gap.backfill_gaps）
         "zs_gap_days": r.get("zs_gap_days"),
+        "zs_width_pct": r.get("zs_width_pct"),
         "zs_note": gap_note(r.get("zs_gap_days")),
         "zs_far": bool((r.get("zs_gap_days") or -1) >= 10),
+        "zs_score": sc.score_of(r.get("zs_width_pct"), r.get("zs_gap_days")),
     } for r in rows]
     out["signals"] = sigs
     out["tradable_count"] = sum(1 for s in sigs if s["is_tradable"])

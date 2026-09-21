@@ -56,17 +56,23 @@ W_THR = 0.12   # 中枢宽度阈值（H4 用的就是它，且 0.10~0.15 都在�
 G_THR = 10     # 距中枢结束天数阈值（H3 用的就是它，8~15 是平台）
 
 
-def score_of(zs_width_pct, zs_gap_days):
-    """0 / 1 / 2。缺数据的因子记 0 分（不能因为「不知道」就给正面评价）。"""
-    s = 0
+def _flag(v, ok):
+    """单个因子：满足记 1，不满足或数据不可用记 0。
+
+    ⚠️ 每个因子**独立**判定。早先的写法把两个因子的 try/except 包在一起，
+    结果「宽度是脏数据」会把「距中枢很近」那一分也一起丢掉 —— 而 docstring 说的是
+    「缺数据的**那个因子**记 0 分」。这是测试抓出来的真 bug。
+    """
     try:
-        if zs_width_pct is not None and float(zs_width_pct) >= W_THR:
-            s += 1
-        if zs_gap_days is not None and 0 <= float(zs_gap_days) < G_THR:
-            s += 1
+        return 1 if (v is not None and ok(float(v))) else 0
     except (TypeError, ValueError):
         return 0
-    return s
+
+
+def score_of(zs_width_pct, zs_gap_days):
+    """0 / 1 / 2。缺数据的**那个因子**记 0 分（不能因为「不知道」就给正面评价）。"""
+    return (_flag(zs_width_pct, lambda x: x >= W_THR)
+            + _flag(zs_gap_days, lambda x: 0 <= x < G_THR))
 
 
 def label_of(score):

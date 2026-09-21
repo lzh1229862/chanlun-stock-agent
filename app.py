@@ -669,13 +669,17 @@ if sigs:
             gap_cell = f'<span class="tag warn">⚠️ {gap} 日</span>'
         else:
             gap_cell = f"{gap} 日"
-        rows.append([esc(x["date"]), confirm, tag, gap_cell, price, tradable, star, filt,
-                     f'<span class="txt">{esc(x.get("reason", ""))}</span>'])
-    html(table(["信号日", "确认日", "类型", "距中枢", "入场参考价", "可交易", "主信号", "过滤", "理由"],
+        # 排序打分（ADR-023/024）：[中枢宽度>=0.12] + [距中枢<10日]，已通过时间样本外验证
+        score_cell = f'<span class="star">{score_label(x.get("zs_score"))}</span>'
+        rows.append([esc(x["date"]), confirm, tag, score_cell, gap_cell, price, tradable, star,
+                     filt, f'<span class="txt">{esc(x.get("reason", ""))}</span>'])
+    html(table(["信号日", "确认日", "类型", "打分", "距中枢", "入场参考价", "可交易", "主信号",
+                "过滤", "理由"],
                rows,
                "信号日 = 触发笔结束日；确认日 = 信号日 + 实测确认延迟（ADR-011，通常 1~2 个交易日）；"
-               "距中枢 = 信号日距最近中枢结束的交易日数 —— 实测 ≥10 日的信号 5 日超额"
-               "从 +1.30% 降到 +0.73%（ADR-021），结构离得远、可靠性下降"))
+               "打分 = [中枢宽度 ≥ 0.12] + [距中枢结束 < 10 日]，★★ / ★ / —，"
+               "已通过时间样本外验证（ADR-024：检验期 5/10/20 日超额差 +1.67% / +2.28% / +3.48%，"
+               "CI 均不跨 0）；距中枢 = 结构离得远的信号可靠性下降（ADR-021）"))
 else:
     st.info("该股票在当前窗口内没有缠论买卖点信号。")
 

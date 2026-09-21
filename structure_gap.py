@@ -133,7 +133,7 @@ def backfill_gaps(db_path=None, dry_run=False, verbose=True):
     conn = ss.connect()
     rows = [dict(r) for r in conn.execute(
         "SELECT stock_code, signal_date, signal_type, confirm_date FROM signals "
-        "WHERE zs_gap_days IS NULL")]
+        "WHERE zs_gap_days IS NULL OR zs_width_pct IS NULL")]
     conn.close()
 
     by_code = defaultdict(list)
@@ -142,15 +142,17 @@ def backfill_gaps(db_path=None, dry_run=False, verbose=True):
 
     updates = []
     for code, sigs in sorted(by_code.items()):
-        gaps = signal_gaps(code, sigs)
+        gw = signal_gap_width(code, sigs)
         for s in sigs:
-            g = gaps.get((s["signal_date"], s["signal_type"]))
+            v = gw.get((s["signal_date"], s["signal_type"])) or {}
+            g, w = v.get("gap"), v.get("width")
             if g is None and s.get("confirm_date"):
                 g = -1          # 已确认但没有中枢可参照 -> 存哨兵值，避免每次重算
             if g is None:
                 continue        # 还没确认，留 NULL 等下次
             updates.append({"stock_code": code, "date": s["signal_date"],
-                            "type": s["signal_type"], "zs_gap_days": g})
+                            "type": s["signal_type"], "zs_gap_days": g,
+                            "zs_width_pct": w})
 
     if verbose:
         print("  待补 zs_gap_days %d 条 -> 本次算出 %d 条" % (len(rows), len(updates)))
@@ -174,12 +176,23 @@ def note_of(gap):
 
 
 def annotate(sigs, gaps):
-    """把 gap 写回信号 dict，并加 H3 提示。**就地修改并返回**。"""
+    """把 gap / width / 打分写回信号 dict。**就地修改并返回**。
+
+    gaps 可以是 {(date,type): gap}（旧形状）或 {(date,type): {"gap","width"}}（signal_gap_width 的形状）。
+    """
+    import signal_score as sc
     for s in sigs:
-        g = gaps.get((s.get("date") or s.get("signal_date"), s.get("type") or s.get("signal_type")))
+        key = (s.get("date") or s.get("signal_date"), s.get("type") or s.get("signal_type"))
+        v = gaps.get(key)
+        if isinstance(v, dict):
+            g, w = v.get("gap"), v.get("width")
+        else:
+            g, w = v, s.get("zs_width_pct")
         s["zs_gap_days"] = g
+        s["zs_width_pct"] = w
         s["zs_note"] = note_of(g)
         s["zs_far"] = bool(g is not None and g >= GAP_THRESHOLD)
+        s["zs_score"] = sc.score_of(w, g)
     return sigs
 
 

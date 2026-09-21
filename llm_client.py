@@ -136,13 +136,17 @@ def _fmt_structure(st):
 
 
 def _fmt_gap(s):
-    """H3 提示：距最近中枢结束的天数（ADR-021）。"""
+    """结构提示：距最近中枢结束的天数（ADR-021）+ 排序打分（ADR-023/024）。"""
+    parts = []
     g = s.get("zs_gap_days")
-    if g is None:
-        return ""
-    if g < 0:
-        return "距中枢：无中枢可参照"
-    return "距最近中枢结束 %d 个交易日%s" % (g, "（结构离得较远，历史超额偏低）" if g >= 10 else "")
+    if g is not None:
+        parts.append("距中枢：无中枢可参照" if g < 0
+                     else "距最近中枢结束 %d 个交易日%s"
+                     % (g, "（结构离得较远，历史超额偏低）" if g >= 10 else ""))
+    sc = s.get("zs_score")
+    if sc is not None:
+        parts.append("排序打分 %d/2%s" % (sc, "（两个有利条件都满足）" if sc == 2 else ""))
+    return "，".join(parts)
 
 
 def _fmt_signals(sigs):

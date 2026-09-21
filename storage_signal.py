@@ -51,11 +51,15 @@ NEW_COLUMNS = [
     # H3（ADR-021 补记）：信号日距最近中枢结束的交易日数。
     # -1 = 已确认但没有中枢可参照；NULL = 还没算（等确认日出来再补）
     ("zs_gap_days", "INTEGER"),
+    # 最近中枢宽度 ÷ 收盘价 —— 排序打分的第二个因子（ADR-023 / ADR-024）。
+    # 与 zs_gap_days 共用一次前缀重算，所以一起存。
+    ("zs_width_pct", "REAL"),
 ]
 
 FIELDS = ["id", "stock_code", "signal_date", "signal_type", "signal_reason", "is_tradable",
           "created_at", "filter_version", "is_primary", "signal_group_id",
-          "confirm_date", "entry_ref_price", "backfill_note", "zs_gap_days"]
+          "confirm_date", "entry_ref_price", "backfill_note", "zs_gap_days",
+          "zs_width_pct"]
 
 DEFAULT_FILTER_VERSION = "v0_no_filter"
 PENDING_NOTE = "待确认：信号日过近，等待后续 K 线确认（方案 A / ADR-012）"
@@ -190,17 +194,20 @@ def set_primary(decisions):
 
 
 def update_gap_days(updates):
-    """回填 zs_gap_days（H3）。
+    """回填 zs_gap_days 与 zs_width_pct（H3 + 中枢宽度）。
 
-    updates: [{"stock_code","date","type","zs_gap_days"}]
+    两者共用一次确认日结构重算（structure_gap.signal_gap_width），所以一起写。
+
+    updates: [{"stock_code","date","type","zs_gap_days","zs_width_pct"}]
     只 UPDATE，不新增/删除行。返回 (匹配行数, 实际变更行数)
     """
     init_db()
-    rows = [(d.get("zs_gap_days"), d["stock_code"], d["date"], d["type"]) for d in updates]
+    rows = [(d.get("zs_gap_days"), d.get("zs_width_pct"),
+             d["stock_code"], d["date"], d["type"]) for d in updates]
     with closing(connect()) as conn, conn:
         before = conn.total_changes
         conn.executemany(
-            "UPDATE signals SET zs_gap_days = ?"
+            "UPDATE signals SET zs_gap_days = ?, zs_width_pct = ?"
             " WHERE stock_code = ? AND signal_date = ? AND signal_type = ?", rows)
         changed = conn.total_changes - before
     return len(rows), changed
