@@ -1,0 +1,2026 @@
+{
+  "built_at": "2026-09-21",
+  "st_window_months": 12,
+  "n": 252,
+  "stocks": [
+    {
+      "code": "000562",
+      "name": "宏源证券",
+      "delist_date": "2015-01-26",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "宏源证券"
+    },
+    {
+      "code": "600832",
+      "name": "东方明珠",
+      "delist_date": "2015-05-20",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "东方明珠"
+    },
+    {
+      "code": "601299",
+      "name": "中国北车",
+      "delist_date": "2015-05-20",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "中国北车"
+    },
+    {
+      "code": "601268",
+      "name": "*ST二重",
+      "delist_date": "2015-05-21",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST二重"
+    },
+    {
+      "code": "000594",
+      "name": "国恒退",
+      "delist_date": "2015-07-13",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "国恒退"
+    },
+    {
+      "code": "300186",
+      "name": "大华农",
+      "delist_date": "2015-11-02",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "大华农"
+    },
+    {
+      "code": "000024",
+      "name": "招商地产",
+      "delist_date": "2015-12-30",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "招商地产"
+    },
+    {
+      "code": "600656",
+      "name": "退市博元",
+      "delist_date": "2016-05-13",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市博元"
+    },
+    {
+      "code": "000748",
+      "name": "长城信息",
+      "delist_date": "2017-01-18",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "长城信息"
+    },
+    {
+      "code": "600005",
+      "name": "武钢股份",
+      "delist_date": "2017-02-14",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "武钢股份"
+    },
+    {
+      "code": "000033",
+      "name": "新都退",
+      "delist_date": "2017-07-07",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "新都退"
+    },
+    {
+      "code": "300372",
+      "name": "欣泰退",
+      "delist_date": "2017-08-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "欣泰退"
+    },
+    {
+      "code": "000916",
+      "name": "华北高速",
+      "delist_date": "2017-12-25",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "华北高速"
+    },
+    {
+      "code": "600432",
+      "name": "退市吉恩",
+      "delist_date": "2018-07-13",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市吉恩"
+    },
+    {
+      "code": "600806",
+      "name": "退市昆机",
+      "delist_date": "2018-07-13",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市昆机"
+    },
+    {
+      "code": "000511",
+      "name": "烯碳退",
+      "delist_date": "2018-07-18",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "烯碳退"
+    },
+    {
+      "code": "600270",
+      "name": "外运发展",
+      "delist_date": "2018-12-28",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "外运发展"
+    },
+    {
+      "code": "000979",
+      "name": "中弘退",
+      "delist_date": "2018-12-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "中弘退"
+    },
+    {
+      "code": "600680",
+      "name": "*ST上普",
+      "delist_date": "2019-05-24",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST上普"
+    },
+    {
+      "code": "000418",
+      "name": "小天鹅Ａ",
+      "delist_date": "2019-06-21",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "小天鹅Ａ"
+    },
+    {
+      "code": "002070",
+      "name": "众和退",
+      "delist_date": "2019-07-09",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "众和退"
+    },
+    {
+      "code": "000693",
+      "name": "华泽退",
+      "delist_date": "2019-07-09",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "华泽退"
+    },
+    {
+      "code": "600401",
+      "name": "退市海润",
+      "delist_date": "2019-07-15",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市海润"
+    },
+    {
+      "code": "002477",
+      "name": "雏鹰退",
+      "delist_date": "2019-10-16",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "雏鹰退"
+    },
+    {
+      "code": "002018",
+      "name": "华信退",
+      "delist_date": "2019-11-01",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "华信退"
+    },
+    {
+      "code": "002680",
+      "name": "长生退",
+      "delist_date": "2019-11-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "长生退"
+    },
+    {
+      "code": "002143",
+      "name": "印纪退",
+      "delist_date": "2019-11-29",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "印纪退"
+    },
+    {
+      "code": "600747",
+      "name": "退市大控",
+      "delist_date": "2019-12-13",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市大控"
+    },
+    {
+      "code": "000018",
+      "name": "神城A退",
+      "delist_date": "2020-01-07",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "神城A退"
+    },
+    {
+      "code": "600240",
+      "name": "退市华业",
+      "delist_date": "2020-02-06",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市华业"
+    },
+    {
+      "code": "600074",
+      "name": "退市保千",
+      "delist_date": "2020-06-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市保千"
+    },
+    {
+      "code": "601558",
+      "name": "退市锐电",
+      "delist_date": "2020-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市锐电"
+    },
+    {
+      "code": "002604",
+      "name": "龙力退",
+      "delist_date": "2020-07-15",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "龙力退"
+    },
+    {
+      "code": "002509",
+      "name": "天茂退",
+      "delist_date": "2020-07-20",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "天茂退"
+    },
+    {
+      "code": "300104",
+      "name": "乐视退",
+      "delist_date": "2020-07-21",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "乐视退"
+    },
+    {
+      "code": "300028",
+      "name": "金亚退",
+      "delist_date": "2020-08-03",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "金亚退"
+    },
+    {
+      "code": "002220",
+      "name": "天宝退",
+      "delist_date": "2020-08-11",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "天宝退"
+    },
+    {
+      "code": "600175",
+      "name": "退市美都",
+      "delist_date": "2020-08-17",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市美都"
+    },
+    {
+      "code": "300090",
+      "name": "盛运退",
+      "delist_date": "2020-08-25",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "盛运退"
+    },
+    {
+      "code": "300156",
+      "name": "神雾退",
+      "delist_date": "2020-08-25",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "神雾退"
+    },
+    {
+      "code": "600069",
+      "name": "退市银鸽",
+      "delist_date": "2020-08-28",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市银鸽"
+    },
+    {
+      "code": "300216",
+      "name": "千山退",
+      "delist_date": "2020-09-16",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "千山退"
+    },
+    {
+      "code": "300431",
+      "name": "暴风退",
+      "delist_date": "2020-11-10",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "暴风退"
+    },
+    {
+      "code": "000939",
+      "name": "凯迪退",
+      "delist_date": "2020-12-17",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "凯迪退"
+    },
+    {
+      "code": "600317",
+      "name": "营口港",
+      "delist_date": "2021-01-29",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "营口港"
+    },
+    {
+      "code": "600687",
+      "name": "退市刚泰",
+      "delist_date": "2021-03-04",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市刚泰"
+    },
+    {
+      "code": "600086",
+      "name": "退市金钰",
+      "delist_date": "2021-03-18",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市金钰"
+    },
+    {
+      "code": "600677",
+      "name": "*ST航通",
+      "delist_date": "2021-03-18",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST航通"
+    },
+    {
+      "code": "600978",
+      "name": "*ST宜生",
+      "delist_date": "2021-03-22",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST宜生"
+    },
+    {
+      "code": "600247",
+      "name": "*ST成城",
+      "delist_date": "2021-03-22",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST成城"
+    },
+    {
+      "code": "000662",
+      "name": "天夏退",
+      "delist_date": "2021-04-12",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "天夏退"
+    },
+    {
+      "code": "600701",
+      "name": "退市工新",
+      "delist_date": "2021-05-06",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市工新"
+    },
+    {
+      "code": "002071",
+      "name": "长城退",
+      "delist_date": "2021-05-07",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "长城退"
+    },
+    {
+      "code": "600891",
+      "name": "退市秋林",
+      "delist_date": "2021-05-12",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市秋林"
+    },
+    {
+      "code": "002450",
+      "name": "康得退",
+      "delist_date": "2021-05-31",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "康得退"
+    },
+    {
+      "code": "600485",
+      "name": "*ST信威",
+      "delist_date": "2021-06-01",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST信威"
+    },
+    {
+      "code": "002711",
+      "name": "欧浦退",
+      "delist_date": "2021-07-15",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "欧浦退"
+    },
+    {
+      "code": "600614",
+      "name": "退市鹏起",
+      "delist_date": "2021-07-22",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市鹏起"
+    },
+    {
+      "code": "600634",
+      "name": "退市富控",
+      "delist_date": "2021-07-22",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市富控"
+    },
+    {
+      "code": "000760",
+      "name": "斯太退",
+      "delist_date": "2021-07-23",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "斯太退"
+    },
+    {
+      "code": "002359",
+      "name": "北讯退",
+      "delist_date": "2021-07-23",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "北讯退"
+    },
+    {
+      "code": "300362",
+      "name": "天翔退",
+      "delist_date": "2021-08-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "天翔退"
+    },
+    {
+      "code": "600068",
+      "name": "葛洲坝",
+      "delist_date": "2021-09-13",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "葛洲坝"
+    },
+    {
+      "code": "600723",
+      "name": "首商股份",
+      "delist_date": "2021-10-22",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "首商股份"
+    },
+    {
+      "code": "000780",
+      "name": "ST平能",
+      "delist_date": "2022-01-24",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST平能"
+    },
+    {
+      "code": "002619",
+      "name": "*ST艾格",
+      "delist_date": "2022-04-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST艾格"
+    },
+    {
+      "code": "600145",
+      "name": "退市新亿",
+      "delist_date": "2022-04-28",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市新亿"
+    },
+    {
+      "code": "000835",
+      "name": "长动退",
+      "delist_date": "2022-05-23",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "长动退"
+    },
+    {
+      "code": "603996",
+      "name": "退市中新",
+      "delist_date": "2022-05-24",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市中新"
+    },
+    {
+      "code": "603157",
+      "name": "退市拉夏",
+      "delist_date": "2022-05-24",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市拉夏"
+    },
+    {
+      "code": "000585",
+      "name": "东电退",
+      "delist_date": "2022-05-24",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "东电退"
+    },
+    {
+      "code": "600291",
+      "name": "退市西水",
+      "delist_date": "2022-06-14",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市西水"
+    },
+    {
+      "code": "600695",
+      "name": "退市绿庭",
+      "delist_date": "2022-06-15",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市绿庭"
+    },
+    {
+      "code": "000687",
+      "name": "华讯退",
+      "delist_date": "2022-06-17",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "华讯退"
+    },
+    {
+      "code": "002260",
+      "name": "德奥退",
+      "delist_date": "2022-06-17",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "德奥退"
+    },
+    {
+      "code": "600091",
+      "name": "退市明科",
+      "delist_date": "2022-06-21",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市明科"
+    },
+    {
+      "code": "600890",
+      "name": "退市中房",
+      "delist_date": "2022-06-21",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市中房"
+    },
+    {
+      "code": "600652",
+      "name": "退市游久",
+      "delist_date": "2022-06-21",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市游久"
+    },
+    {
+      "code": "002473",
+      "name": "圣莱退",
+      "delist_date": "2022-06-22",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "圣莱退"
+    },
+    {
+      "code": "600856",
+      "name": "退市中天",
+      "delist_date": "2022-06-22",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市中天"
+    },
+    {
+      "code": "600275",
+      "name": "退市昌鱼",
+      "delist_date": "2022-06-22",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市昌鱼"
+    },
+    {
+      "code": "300178",
+      "name": "腾邦退",
+      "delist_date": "2022-06-22",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "腾邦退"
+    },
+    {
+      "code": "002618",
+      "name": "丹邦退",
+      "delist_date": "2022-06-22",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "丹邦退"
+    },
+    {
+      "code": "600209",
+      "name": "退市罗顿",
+      "delist_date": "2022-06-22",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市罗顿"
+    },
+    {
+      "code": "002770",
+      "name": "科迪退",
+      "delist_date": "2022-06-23",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "科迪退"
+    },
+    {
+      "code": "600093",
+      "name": "退市易见",
+      "delist_date": "2022-06-23",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市易见"
+    },
+    {
+      "code": "002147",
+      "name": "新光退",
+      "delist_date": "2022-06-23",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "新光退"
+    },
+    {
+      "code": "002447",
+      "name": "晨鑫退",
+      "delist_date": "2022-06-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "晨鑫退"
+    },
+    {
+      "code": "300064",
+      "name": "金刚退",
+      "delist_date": "2022-06-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "金刚退"
+    },
+    {
+      "code": "000502",
+      "name": "绿景退",
+      "delist_date": "2022-06-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "绿景退"
+    },
+    {
+      "code": "002684",
+      "name": "猛狮退",
+      "delist_date": "2022-06-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "猛狮退"
+    },
+    {
+      "code": "300325",
+      "name": "德威退",
+      "delist_date": "2022-06-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "德威退"
+    },
+    {
+      "code": "000611",
+      "name": "天首退",
+      "delist_date": "2022-06-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "天首退"
+    },
+    {
+      "code": "002464",
+      "name": "众应退",
+      "delist_date": "2022-06-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "众应退"
+    },
+    {
+      "code": "300023",
+      "name": "宝德退",
+      "delist_date": "2022-06-29",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "宝德退"
+    },
+    {
+      "code": "000613",
+      "name": "东海A退",
+      "delist_date": "2022-06-29",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "东海A退"
+    },
+    {
+      "code": "300367",
+      "name": "网力退",
+      "delist_date": "2022-06-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "网力退"
+    },
+    {
+      "code": "600870",
+      "name": "退市厦华",
+      "delist_date": "2022-06-30",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市厦华"
+    },
+    {
+      "code": "300038",
+      "name": "数知退",
+      "delist_date": "2022-06-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "数知退"
+    },
+    {
+      "code": "600146",
+      "name": "退市环球",
+      "delist_date": "2022-06-30",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市环球"
+    },
+    {
+      "code": "300312",
+      "name": "邦讯退",
+      "delist_date": "2022-07-04",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "邦讯退"
+    },
+    {
+      "code": "300202",
+      "name": "聚龙退",
+      "delist_date": "2022-07-04",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "聚龙退"
+    },
+    {
+      "code": "000673",
+      "name": "当代退",
+      "delist_date": "2022-07-04",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "当代退"
+    },
+    {
+      "code": "600385",
+      "name": "退市金泰",
+      "delist_date": "2022-07-07",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市金泰"
+    },
+    {
+      "code": "600090",
+      "name": "退市济堂",
+      "delist_date": "2022-07-07",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市济堂"
+    },
+    {
+      "code": "600555",
+      "name": "退市海创",
+      "delist_date": "2022-07-14",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市海创"
+    },
+    {
+      "code": "600896",
+      "name": "退市海医",
+      "delist_date": "2022-07-25",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市海医"
+    },
+    {
+      "code": "600260",
+      "name": "*ST凯乐",
+      "delist_date": "2023-02-15",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST凯乐"
+    },
+    {
+      "code": "002013",
+      "name": "中航机电",
+      "delist_date": "2023-03-17",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "中航机电"
+    },
+    {
+      "code": "600311",
+      "name": "*ST荣华",
+      "delist_date": "2023-03-27",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST荣华"
+    },
+    {
+      "code": "600139",
+      "name": "*ST西源",
+      "delist_date": "2023-03-27",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST西源"
+    },
+    {
+      "code": "000587",
+      "name": "*ST金洲",
+      "delist_date": "2023-04-03",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST金洲"
+    },
+    {
+      "code": "002499",
+      "name": "科林退",
+      "delist_date": "2023-04-18",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "科林退"
+    },
+    {
+      "code": "300330",
+      "name": "计通退",
+      "delist_date": "2023-05-24",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "计通退"
+    },
+    {
+      "code": "300309",
+      "name": "吉艾退",
+      "delist_date": "2023-05-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "吉艾退"
+    },
+    {
+      "code": "600466",
+      "name": "*ST蓝光",
+      "delist_date": "2023-06-06",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST蓝光"
+    },
+    {
+      "code": "000150",
+      "name": "*ST宜康",
+      "delist_date": "2023-06-09",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST宜康"
+    },
+    {
+      "code": "600122",
+      "name": "*ST宏图",
+      "delist_date": "2023-06-26",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST宏图"
+    },
+    {
+      "code": "600781",
+      "name": "退市辅仁",
+      "delist_date": "2023-06-28",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市辅仁"
+    },
+    {
+      "code": "600532",
+      "name": "退市未来",
+      "delist_date": "2023-06-28",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市未来"
+    },
+    {
+      "code": "600767",
+      "name": "退市运盛",
+      "delist_date": "2023-06-29",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市运盛"
+    },
+    {
+      "code": "600242",
+      "name": "退市中昌",
+      "delist_date": "2023-06-29",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市中昌"
+    },
+    {
+      "code": "000540",
+      "name": "*ST中天",
+      "delist_date": "2023-06-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST中天"
+    },
+    {
+      "code": "601258",
+      "name": "*ST庞大",
+      "delist_date": "2023-06-30",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST庞大"
+    },
+    {
+      "code": "002781",
+      "name": "奇信退",
+      "delist_date": "2023-07-05",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "奇信退"
+    },
+    {
+      "code": "300336",
+      "name": "新文退",
+      "delist_date": "2023-07-05",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "新文退"
+    },
+    {
+      "code": "000806",
+      "name": "银河退",
+      "delist_date": "2023-07-06",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "银河退"
+    },
+    {
+      "code": "300273",
+      "name": "和佳退",
+      "delist_date": "2023-07-06",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "和佳退"
+    },
+    {
+      "code": "000606",
+      "name": "顺利退",
+      "delist_date": "2023-07-06",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "顺利退"
+    },
+    {
+      "code": "688086",
+      "name": "退市紫晶",
+      "delist_date": "2023-07-07",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市紫晶"
+    },
+    {
+      "code": "688555",
+      "name": "退市泽达",
+      "delist_date": "2023-07-07",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市泽达"
+    },
+    {
+      "code": "002417",
+      "name": "深南退",
+      "delist_date": "2023-07-10",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "深南退"
+    },
+    {
+      "code": "300392",
+      "name": "腾信退",
+      "delist_date": "2023-07-10",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "腾信退"
+    },
+    {
+      "code": "300526",
+      "name": "中潜退",
+      "delist_date": "2023-07-12",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "中潜退"
+    },
+    {
+      "code": "002411",
+      "name": "必康退",
+      "delist_date": "2023-07-12",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "必康退"
+    },
+    {
+      "code": "000038",
+      "name": "大通退",
+      "delist_date": "2023-07-12",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "大通退"
+    },
+    {
+      "code": "300089",
+      "name": "文化退",
+      "delist_date": "2023-07-13",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "文化退"
+    },
+    {
+      "code": "300356",
+      "name": "光一退",
+      "delist_date": "2023-07-13",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "光一退"
+    },
+    {
+      "code": "002751",
+      "name": "易尚退",
+      "delist_date": "2023-07-13",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "易尚退"
+    },
+    {
+      "code": "000667",
+      "name": "ST美置",
+      "delist_date": "2023-07-14",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST美置"
+    },
+    {
+      "code": "600393",
+      "name": "ST粤泰",
+      "delist_date": "2023-07-18",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "ST粤泰"
+    },
+    {
+      "code": "600077",
+      "name": "*ST宋都",
+      "delist_date": "2023-07-25",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST宋都"
+    },
+    {
+      "code": "000918",
+      "name": "*ST嘉凯",
+      "delist_date": "2023-07-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST嘉凯"
+    },
+    {
+      "code": "300297",
+      "name": "蓝盾退",
+      "delist_date": "2023-07-31",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "蓝盾退"
+    },
+    {
+      "code": "000732",
+      "name": "ST泰禾",
+      "delist_date": "2023-08-04",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST泰禾"
+    },
+    {
+      "code": "002118",
+      "name": "*ST紫鑫",
+      "delist_date": "2023-08-04",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST紫鑫"
+    },
+    {
+      "code": "002113",
+      "name": "*ST天润",
+      "delist_date": "2023-08-11",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST天润"
+    },
+    {
+      "code": "002503",
+      "name": "*ST搜特",
+      "delist_date": "2023-08-11",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST搜特"
+    },
+    {
+      "code": "000671",
+      "name": "ST阳光城",
+      "delist_date": "2023-08-16",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST阳光城"
+    },
+    {
+      "code": "002504",
+      "name": "*ST弘高",
+      "delist_date": "2023-08-21",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST弘高"
+    },
+    {
+      "code": "000616",
+      "name": "*ST海投",
+      "delist_date": "2023-08-23",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST海投"
+    },
+    {
+      "code": "000666",
+      "name": "经纬纺机",
+      "delist_date": "2023-10-26",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "经纬纺机"
+    },
+    {
+      "code": "600290",
+      "name": "*ST华仪",
+      "delist_date": "2024-01-16",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST华仪"
+    },
+    {
+      "code": "002776",
+      "name": "*ST柏龙",
+      "delist_date": "2024-01-25",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST柏龙"
+    },
+    {
+      "code": "000046",
+      "name": "*ST泛海",
+      "delist_date": "2024-02-07",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST泛海"
+    },
+    {
+      "code": "002740",
+      "name": "*ST爱迪",
+      "delist_date": "2024-03-04",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST爱迪"
+    },
+    {
+      "code": "002002",
+      "name": "ST鸿达",
+      "delist_date": "2024-03-18",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST鸿达"
+    },
+    {
+      "code": "603555",
+      "name": "ST贵人",
+      "delist_date": "2024-03-29",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "ST贵人"
+    },
+    {
+      "code": "002089",
+      "name": "新海退",
+      "delist_date": "2024-04-18",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "新海退"
+    },
+    {
+      "code": "603603",
+      "name": "退市博天",
+      "delist_date": "2024-04-25",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市博天"
+    },
+    {
+      "code": "000005",
+      "name": "ST星源",
+      "delist_date": "2024-04-26",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST星源"
+    },
+    {
+      "code": "000416",
+      "name": "*ST民控",
+      "delist_date": "2024-06-05",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST民控"
+    },
+    {
+      "code": "002699",
+      "name": "*ST美盛",
+      "delist_date": "2024-06-05",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST美盛"
+    },
+    {
+      "code": "600823",
+      "name": "*ST世茂",
+      "delist_date": "2024-06-14",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST世茂"
+    },
+    {
+      "code": "600306",
+      "name": "退市商城",
+      "delist_date": "2024-06-26",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市商城"
+    },
+    {
+      "code": "600321",
+      "name": "正源股份",
+      "delist_date": "2024-06-27",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "正源股份"
+    },
+    {
+      "code": "000996",
+      "name": "中期退",
+      "delist_date": "2024-06-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "中期退"
+    },
+    {
+      "code": "002087",
+      "name": "新纺退",
+      "delist_date": "2024-06-28",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "新纺退"
+    },
+    {
+      "code": "600766",
+      "name": "退市园城",
+      "delist_date": "2024-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市园城"
+    },
+    {
+      "code": "600647",
+      "name": "退市同达",
+      "delist_date": "2024-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市同达"
+    },
+    {
+      "code": "603133",
+      "name": "退市碳元",
+      "delist_date": "2024-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市碳元"
+    },
+    {
+      "code": "002433",
+      "name": "太安退",
+      "delist_date": "2024-07-05",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "太安退"
+    },
+    {
+      "code": "600220",
+      "name": "ST阳光",
+      "delist_date": "2024-07-10",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "ST阳光"
+    },
+    {
+      "code": "600836",
+      "name": "*ST易连",
+      "delist_date": "2024-07-11",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST易连"
+    },
+    {
+      "code": "000961",
+      "name": "ST中南",
+      "delist_date": "2024-07-11",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST中南"
+    },
+    {
+      "code": "600277",
+      "name": "ST亿利",
+      "delist_date": "2024-07-18",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "ST亿利"
+    },
+    {
+      "code": "300282",
+      "name": "三盛退",
+      "delist_date": "2024-07-18",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "三盛退"
+    },
+    {
+      "code": "300742",
+      "name": "越博退",
+      "delist_date": "2024-07-22",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "越博退"
+    },
+    {
+      "code": "000971",
+      "name": "*ST高升",
+      "delist_date": "2024-07-24",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST高升"
+    },
+    {
+      "code": "300116",
+      "name": "*ST保力",
+      "delist_date": "2024-07-25",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST保力"
+    },
+    {
+      "code": "300799",
+      "name": "左江退",
+      "delist_date": "2024-07-29",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "左江退"
+    },
+    {
+      "code": "002621",
+      "name": "*ST美吉",
+      "delist_date": "2024-08-05",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST美吉"
+    },
+    {
+      "code": "600565",
+      "name": "ST迪马",
+      "delist_date": "2024-08-07",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "ST迪马"
+    },
+    {
+      "code": "000982",
+      "name": "中银绒业",
+      "delist_date": "2024-08-12",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "中银绒业"
+    },
+    {
+      "code": "000836",
+      "name": "ST富通",
+      "delist_date": "2024-08-12",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST富通"
+    },
+    {
+      "code": "002610",
+      "name": "ST爱康",
+      "delist_date": "2024-08-12",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST爱康"
+    },
+    {
+      "code": "600112",
+      "name": "*ST天成",
+      "delist_date": "2024-08-15",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST天成"
+    },
+    {
+      "code": "002325",
+      "name": "*ST洪涛",
+      "delist_date": "2024-08-15",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST洪涛"
+    },
+    {
+      "code": "002435",
+      "name": "ST长康",
+      "delist_date": "2024-08-15",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST长康"
+    },
+    {
+      "code": "002280",
+      "name": "ST联络",
+      "delist_date": "2024-08-16",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST联络"
+    },
+    {
+      "code": "002288",
+      "name": "*ST超华",
+      "delist_date": "2024-08-19",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST超华"
+    },
+    {
+      "code": "300262",
+      "name": "*ST巴安",
+      "delist_date": "2024-08-19",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST巴安"
+    },
+    {
+      "code": "002341",
+      "name": "ST新纶",
+      "delist_date": "2024-08-23",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST新纶"
+    },
+    {
+      "code": "002665",
+      "name": "ST航高",
+      "delist_date": "2024-08-26",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST航高"
+    },
+    {
+      "code": "000976",
+      "name": "*ST华铁",
+      "delist_date": "2024-08-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST华铁"
+    },
+    {
+      "code": "600297",
+      "name": "广汇汽车",
+      "delist_date": "2024-08-28",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "广汇汽车"
+    },
+    {
+      "code": "002505",
+      "name": "鹏都农牧",
+      "delist_date": "2024-08-30",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "鹏都农牧"
+    },
+    {
+      "code": "000023",
+      "name": "*ST深天",
+      "delist_date": "2024-09-02",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST深天"
+    },
+    {
+      "code": "002502",
+      "name": "ST鼎龙",
+      "delist_date": "2024-09-05",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST鼎龙"
+    },
+    {
+      "code": "000861",
+      "name": "海印股份",
+      "delist_date": "2024-09-18",
+      "src": "sz",
+      "is_failure": false,
+      "name_short": "海印股份"
+    },
+    {
+      "code": "300495",
+      "name": "*ST美尚",
+      "delist_date": "2024-09-20",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST美尚"
+    },
+    {
+      "code": "002308",
+      "name": "*ST威创",
+      "delist_date": "2024-09-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST威创"
+    },
+    {
+      "code": "000413",
+      "name": "ST旭电",
+      "delist_date": "2024-10-11",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "ST旭电"
+    },
+    {
+      "code": "600213",
+      "name": "*ST亚星",
+      "delist_date": "2024-10-17",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST亚星"
+    },
+    {
+      "code": "600898",
+      "name": "*ST美讯",
+      "delist_date": "2025-02-10",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST美讯"
+    },
+    {
+      "code": "600837",
+      "name": "海通证券",
+      "delist_date": "2025-03-04",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "海通证券"
+    },
+    {
+      "code": "600083",
+      "name": "*ST博信",
+      "delist_date": "2025-03-05",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST博信"
+    },
+    {
+      "code": "600225",
+      "name": "退市卓朗",
+      "delist_date": "2025-03-06",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市卓朗"
+    },
+    {
+      "code": "603963",
+      "name": "*ST大药",
+      "delist_date": "2025-03-21",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST大药"
+    },
+    {
+      "code": "000040",
+      "name": "*ST旭蓝",
+      "delist_date": "2025-04-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST旭蓝"
+    },
+    {
+      "code": "600070",
+      "name": "*ST富润",
+      "delist_date": "2025-04-30",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST富润"
+    },
+    {
+      "code": "600811",
+      "name": "*ST东方",
+      "delist_date": "2025-04-30",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST东方"
+    },
+    {
+      "code": "300117",
+      "name": "*ST嘉寓",
+      "delist_date": "2025-04-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST嘉寓"
+    },
+    {
+      "code": "300630",
+      "name": "普利退",
+      "delist_date": "2025-05-22",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "普利退"
+    },
+    {
+      "code": "601028",
+      "name": "玉龙股份",
+      "delist_date": "2025-05-27",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "玉龙股份"
+    },
+    {
+      "code": "600705",
+      "name": "中航产融",
+      "delist_date": "2025-05-27",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "中航产融"
+    },
+    {
+      "code": "300108",
+      "name": "*ST吉药",
+      "delist_date": "2025-05-29",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST吉药"
+    },
+    {
+      "code": "002750",
+      "name": "龙津退",
+      "delist_date": "2025-06-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "龙津退"
+    },
+    {
+      "code": "603003",
+      "name": "退市龙宇",
+      "delist_date": "2025-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市龙宇"
+    },
+    {
+      "code": "600804",
+      "name": "退市鹏博",
+      "delist_date": "2025-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市鹏博"
+    },
+    {
+      "code": "002336",
+      "name": "人乐退",
+      "delist_date": "2025-07-04",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "人乐退"
+    },
+    {
+      "code": "000584",
+      "name": "工智退",
+      "delist_date": "2025-07-11",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "工智退"
+    },
+    {
+      "code": "600387",
+      "name": "退市海越",
+      "delist_date": "2025-07-11",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市海越"
+    },
+    {
+      "code": "000622",
+      "name": "恒立退",
+      "delist_date": "2025-07-16",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "恒立退"
+    },
+    {
+      "code": "300208",
+      "name": "中程退",
+      "delist_date": "2025-07-21",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "中程退"
+    },
+    {
+      "code": "600462",
+      "name": "退市九有",
+      "delist_date": "2025-07-21",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市九有"
+    },
+    {
+      "code": "600190",
+      "name": "退市锦港",
+      "delist_date": "2025-07-28",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市锦港"
+    },
+    {
+      "code": "601989",
+      "name": "中国重工",
+      "delist_date": "2025-09-05",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "中国重工"
+    },
+    {
+      "code": "000627",
+      "name": "*ST天茂",
+      "delist_date": "2025-09-30",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST天茂"
+    },
+    {
+      "code": "300280",
+      "name": "紫天退",
+      "delist_date": "2025-10-14",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "紫天退"
+    },
+    {
+      "code": "000851",
+      "name": "*ST高鸿",
+      "delist_date": "2025-11-11",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST高鸿"
+    },
+    {
+      "code": "603388",
+      "name": "*ST元成",
+      "delist_date": "2025-12-05",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST元成"
+    },
+    {
+      "code": "600200",
+      "name": "退市苏吴",
+      "delist_date": "2025-12-31",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市苏吴"
+    },
+    {
+      "code": "300379",
+      "name": "东通退",
+      "delist_date": "2026-01-22",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "东通退"
+    },
+    {
+      "code": "002231",
+      "name": "*ST奥维",
+      "delist_date": "2026-03-27",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST奥维"
+    },
+    {
+      "code": "603056",
+      "name": "德邦股份",
+      "delist_date": "2026-03-31",
+      "src": "sh",
+      "is_failure": false,
+      "name_short": "德邦股份"
+    },
+    {
+      "code": "300391",
+      "name": "长药退",
+      "delist_date": "2026-04-13",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "长药退"
+    },
+    {
+      "code": "300344",
+      "name": "立方退",
+      "delist_date": "2026-04-22",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "立方退"
+    },
+    {
+      "code": "600355",
+      "name": "*ST精伦",
+      "delist_date": "2026-04-27",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "*ST精伦"
+    },
+    {
+      "code": "000638",
+      "name": "*ST万方",
+      "delist_date": "2026-06-03",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "*ST万方"
+    },
+    {
+      "code": "688287",
+      "name": "退市观典",
+      "delist_date": "2026-06-10",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市观典"
+    },
+    {
+      "code": "600599",
+      "name": "退市熊猫",
+      "delist_date": "2026-06-26",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市熊猫"
+    },
+    {
+      "code": "600421",
+      "name": "退市华嵘",
+      "delist_date": "2026-06-26",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市华嵘"
+    },
+    {
+      "code": "600636",
+      "name": "退市国化",
+      "delist_date": "2026-06-29",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市国化"
+    },
+    {
+      "code": "600696",
+      "name": "退市岩石",
+      "delist_date": "2026-06-29",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市岩石"
+    },
+    {
+      "code": "600608",
+      "name": "退市沪科",
+      "delist_date": "2026-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市沪科"
+    },
+    {
+      "code": "605081",
+      "name": "退市太和",
+      "delist_date": "2026-07-03",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市太和"
+    },
+    {
+      "code": "600193",
+      "name": "退市创兴",
+      "delist_date": "2026-07-06",
+      "src": "sh",
+      "is_failure": true,
+      "name_short": "退市创兴"
+    },
+    {
+      "code": "300029",
+      "name": "天龙退",
+      "delist_date": "2026-07-10",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "天龙退"
+    },
+    {
+      "code": "002808",
+      "name": "恒久退",
+      "delist_date": "2026-07-14",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "恒久退"
+    },
+    {
+      "code": "000004",
+      "name": "国华退",
+      "delist_date": "2026-07-14",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "国华退"
+    },
+    {
+      "code": "002898",
+      "name": "赛隆退",
+      "delist_date": "2026-07-17",
+      "src": "sz",
+      "is_failure": true,
+      "name_short": "赛隆退"
+    }
+  ],
+  "n_failure": 227,
+  "n_merger": 25,
+  "note": "is_failure = 名称含 退/ST，视为「真退市」（风险类）；其余多为吸收合并/重组。对比幸存者偏差时应该分层看 —— 重组股不是「会死的股票」。"
+}

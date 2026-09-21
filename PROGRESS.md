@@ -28,6 +28,7 @@
 | 第 21 轮 | 60 分钟级别共振验证 | `storage_minute.py` / `verify_minute.py`（ADR-025） |
 | 第 22 轮 | 打分接进单股路径（signals 表加 zs_width_pct）+ 修一个逐因子判定的真 bug | ADR-024 补记（T22） |
 | 第 23 轮 | 单因子 vs 组合的样本外对比 | verify_score_compare.py（ADR-026） |
+| 第 24 轮 | 幸存者偏差：退市股池 + 按日期判定 ST（选项 c） | delisted_pool.py / verify_survivorship.py（ADR-027，进行中） |
 
 ## 当前状态
 
