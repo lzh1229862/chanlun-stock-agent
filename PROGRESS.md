@@ -49,6 +49,7 @@
 | 第 30 轮 | B4 交易成本敏感性 | 成本扫描 + 分层滑点（ADR-032） |
 | 第 31 轮 | B5 多重比较台账 + FDR | verify_multiple.py（ADR-033） |
 | 第 32 轮 | B7 信号失效提醒 + B8 本股打分历史 + 默认白天模式 | app.py / .streamlit/config.toml（ADR-034） |
+| 第 33 轮 | B6 幸存者偏差（252 只退市股，结论与预期相反） | verify_survivorship.py（ADR-035） |
 
 ## 当前状态
 

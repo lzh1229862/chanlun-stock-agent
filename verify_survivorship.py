@@ -134,38 +134,82 @@ def fmt_rows(rows):
     return out
 
 
-def run_survivors(codes, windows=WINDOWS, verbose=True):
-    from storage_kline import load_kline
-    recs = []
-    for c in codes:
+CACHE = Path("data/survivorship_cache.json")
+
+
+def _load_cache():
+    if CACHE.exists():
         try:
-            df = load_kline(c)
+            return json.loads(CACHE.read_text(encoding="utf-8"))
         except Exception:
-            continue
-        if df.empty:
-            continue
-        r, _b, note = cohort_signals(df, c, windows)
-        recs += r
-        if verbose:
-            print("    存活 %s  %s" % (c, note), flush=True)
+            return {}
+    return {}
+
+
+def _save_cache(c):
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE.write_text(json.dumps(c, ensure_ascii=False), encoding="utf-8")
+
+
+def _pack(r):
+    return [[x["signal_date"], x["signal_type"], x["window"], x["ret"], x["exc"]] for x in r]
+
+
+def _unpack(packed):
+    return [{"signal_date": a, "signal_type": b, "window": c, "ret": d, "exc": e}
+            for a, b, c, d, e in packed]
+
+
+def cached_run(items, key_of, load, compute, windows=WINDOWS, limit=None, verbose=True,
+               label=""):
+    """带缓存的逐只计算。items -> [(code, extra)]；cache key 由 key_of 生成。
+
+    每只算完立刻落盘，所以可以中途 Ctrl+C，下次接着跑（工具的单次调用有上限，
+    297 只 x 约 9 秒跑不完一次）。
+    """
+    cache = _load_cache()
+    recs, done, skipped = [], 0, 0
+    for it in items:
+        code = it[0]
+        k = key_of(it)
+        if k not in cache:
+            if limit is not None and done >= limit:
+                skipped += 1
+                continue
+            df = load(it)
+            if df is None or df.empty:
+                cache[k] = {"records": [], "note": "无数据"}
+                continue
+            r, _b, note = compute(df, it)
+            cache[k] = {"records": _pack(r), "note": note}
+            done += 1
+            if verbose:
+                print("    %s %-8s %s (%d 条)" % (label, code, note, len(r)), flush=True)
+            if done % 5 == 0:
+                _save_cache(cache)
+        recs += _unpack(cache[k]["records"])
+    _save_cache(cache)
+    if verbose and limit is not None:
+        print("    本次新算 %d 只，剩余 %d 只未算（缓存在 %s）" % (done, skipped, CACHE))
     return recs
 
 
-def run_delisted(pool, windows=WINDOWS, verbose=True):
-    recs, done, empty = [], 0, 0
-    for s in pool:
-        df = load_delisted(s["code"])
-        if df.empty:
-            empty += 1
-            continue
-        r, _b, note = cohort_signals(df, s["code"], windows, st_cut=s["delist_date"])
-        recs += r
-        done += 1
-        if verbose and done % 20 == 0:
-            print("    退市已算 %d 只（无数据 %d）…" % (done, empty), flush=True)
-    if verbose:
-        print("    退市有数据 %d 只 / 无数据 %d 只" % (done, empty))
-    return recs
+def run_survivors(codes, windows=WINDOWS, verbose=True, limit=None):
+    from storage_kline import load_kline
+    items = [(c, None) for c in codes]
+    return cached_run(items, lambda it: "surv|" + it[0],
+                      lambda it: load_kline(it[0]),
+                      lambda df, it: cohort_signals(df, it[0], windows),
+                      windows=windows, limit=limit, verbose=verbose, label="存活")
+
+
+def run_delisted(pool, windows=WINDOWS, verbose=True, limit=None):
+    return cached_run([(s["code"], s) for s in pool],
+                      lambda it: "del|" + it[0],
+                      lambda it: load_delisted(it[0]),
+                      lambda df, it: cohort_signals(df, it[0], windows,
+                                                    st_cut=it[1]["delist_date"]),
+                      windows=windows, limit=limit, verbose=verbose, label="退市")
 
 
 def compare(surv, dels, windows=WINDOWS):
@@ -192,6 +236,8 @@ def compare(surv, dels, windows=WINDOWS):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--smoke", type=int, default=0, help="只抽 N 只存活股 + N 只退市股试跑")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="本次最多新算 N 只（其余读缓存）；不传则全算（可能超过工具单次上限）")
     a = ap.parse_args()
 
     import watchlist_store as ws
@@ -212,12 +258,17 @@ def main():
           % (len(surv_codes), len(dl_pool), len(pool)))
     print("  ST 窗口 = 退市前 %d 个月（选项 c）" % ST_WINDOW_MONTHS)
     print()
+    cache = _load_cache()
+    n_surv = sum(1 for c in surv_codes if ("surv|" + c) in cache)
+    n_del = sum(1 for s in dl_pool if ("del|" + s["code"]) in cache)
+    print("  缓存：存活 %d/%d 只，退市 %d/%d 只"
+          % (n_surv, len(surv_codes), n_del, len(dl_pool)))
     print("  算存活股…")
-    surv = run_survivors(surv_codes, verbose=bool(a.smoke))
-    print("  存活股信号 %d 条" % len(surv))
+    surv = run_survivors(surv_codes, verbose=bool(a.smoke), limit=a.limit)
+    print("  存活股回测记录 %d 条（= 信号数 x 窗口数）" % len(surv))
     print("  算退市股…")
-    dels = run_delisted(dl_pool, verbose=True)
-    print("  退市股信号 %d 条" % len(dels))
+    dels = run_delisted(dl_pool, verbose=bool(a.smoke), limit=a.limit)
+    print("  退市股回测记录 %d 条" % len(dels))
     if len(surv) < 20 or len(dels) < 20:
         print()
         print("  ⚠️ 样本太少（存活 %d / 退市 %d），先跑 --smoke 或等数据拉齐"
