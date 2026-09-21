@@ -1,0 +1,67 @@
+{
+  "preregistered_at": "2026-09-21 13:23:45",
+  "question": "ADR-019 / ADR-020 的那些全样本结论，在检验期还站得住吗？",
+  "train_period": [
+    "2015-01-01",
+    "2020-12-31"
+  ],
+  "test_period": [
+    "2021-01-01",
+    "2026-12-31"
+  ],
+  "window": 5,
+  "pass_criteria": "只看检验期：CI 不跨 0（C9 反过来要求跨 0）+ 方向正确 + 分半一致",
+  "claims": [
+    {
+      "id": "C1",
+      "desc": "第一类买点 在检验期 5 日超额 > 0 且 CI 不跨 0",
+      "kind": "type_excess",
+      "signal_type": "第一类买点"
+    },
+    {
+      "id": "C2",
+      "desc": "第一类卖点 在检验期 5 日超额 > 0 且 CI 不跨 0",
+      "kind": "type_excess",
+      "signal_type": "第一类卖点"
+    },
+    {
+      "id": "C3",
+      "desc": "第二类买点 在检验期 5 日超额 > 0 且 CI 不跨 0",
+      "kind": "type_excess",
+      "signal_type": "第二类买点"
+    },
+    {
+      "id": "C4",
+      "desc": "第二类卖点 在检验期 5 日超额 > 0 且 CI 不跨 0",
+      "kind": "type_excess",
+      "signal_type": "第二类卖点"
+    },
+    {
+      "id": "C5",
+      "desc": "第三类买点 在检验期 5 日超额 > 0 且 CI 不跨 0",
+      "kind": "type_excess",
+      "signal_type": "第三类买点"
+    },
+    {
+      "id": "C6",
+      "desc": "第三类卖点 在检验期 5 日超额 > 0 且 CI 不跨 0",
+      "kind": "type_excess",
+      "signal_type": "第三类卖点"
+    },
+    {
+      "id": "C7",
+      "desc": "买点真 alpha（vs 沪深300）在上行/震荡/下行三状态均 > 0 且 CI 不跨 0",
+      "kind": "buy_alpha_all_regimes"
+    },
+    {
+      "id": "C8",
+      "desc": "卖点真 alpha 只在「上行」显著，震荡/下行 CI 跨 0",
+      "kind": "sell_alpha_only_up"
+    },
+    {
+      "id": "C9",
+      "desc": "随机 35 只 vs 知名 10 只，差值 CI 跨 0（无显著差异）",
+      "kind": "random_vs_famous"
+    }
+  ]
+}
