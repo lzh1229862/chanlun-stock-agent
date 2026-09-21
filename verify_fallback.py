@@ -69,10 +69,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--offline", action="store_true", help="跳过需要联网的用例")
     ap.add_argument("--code", default="600519")
-    ap.add_argument("--date", default=str(date.today()))
+    ap.add_argument("--date", default=None,
+                    help="默认取该股票**本地数据的最后一天** —— T1 的前提是「本地最新」，"
+                         "若用 date.today()，一旦今天是交易日而数据还没发布，前提就不成立，"
+                         "T1 会假失败（实测踩过：系统日 2026-09-21、本地数据到 2026-09-18）")
     args = ap.parse_args()
-    code, day = args.code, args.date
-    print("标的 " + code + "    报告日期 " + day)
+    code = args.code
+    if args.date:
+        day = args.date
+    else:
+        _d = sk.load_kline(code)
+        day = str(_d["date"].iloc[-1].date()) if not _d.empty else str(date.today())
+    print("标的 " + code + "    报告日期 " + day + "（默认 = 本地数据最后一天）")
     print()
 
     # ---------------- T1 缓存命中：连网络都掐掉，仍应成功 ----------------

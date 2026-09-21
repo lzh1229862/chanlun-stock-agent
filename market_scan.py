@@ -54,9 +54,11 @@ from pathlib import Path
 
 import pandas as pd
 
+import signal_score as sc
 import structure_gap as sg
 from confirm_dates import confirm_entry, load_frames
 from min_loop import build_signals
+from storage_kline import load_kline
 from storage_signal import DB_PATH
 
 # 历史深度：扫描器只需要算「当前结构」，不需要 11 年。
@@ -79,6 +81,8 @@ CREATE TABLE IF NOT EXISTS scan_results (
     signal_type  TEXT NOT NULL,
     is_primary   INTEGER DEFAULT 1,
     zs_gap_days  INTEGER,
+    zs_width_pct REAL,
+    score        INTEGER,
     amount_yi    REAL,
     scanned_at   TEXT,
     PRIMARY KEY (scan_date, stock_code, signal_date, signal_type)
@@ -105,9 +109,17 @@ def connect(db_path=None):
     return conn
 
 
+# 后加的列（scan_results 可能已存在旧版本）
+SCAN_NEW_COLUMNS = [("zs_width_pct", "REAL"), ("score", "INTEGER")]
+
+
 def init_db(db_path=None):
     with closing(connect(db_path)) as conn, conn:
         conn.executescript(SCAN_DDL)
+        have = {r[1] for r in conn.execute("PRAGMA table_info(scan_results)")}
+        for name, ddl in SCAN_NEW_COLUMNS:
+            if name not in have:
+                conn.execute("ALTER TABLE scan_results ADD COLUMN %s %s" % (name, ddl))
 
 
 def ok_code(code, name):
@@ -148,6 +160,31 @@ def last_trading_day(today=None):
     today = pd.Timestamp(today or date.today())
     prev = [d for d in trading_calendar() if d <= today]
     return prev[-1].date() if prev else None
+
+
+def data_end_date(probe=None):
+    """本地数据**实际**到哪一天。
+
+    不能直接用 last_trading_day()：如果今天的数据还没发布（盘中、或早盘跑），
+    日历会说今天是交易日，但本地根本没有今天的 K 线 —— 那样扫描日会标成一个
+    「还没有数据的日子」，窗口也会悄悄往前错。**实测踩到过**（标成 09-21，数据只到 09-18）。
+
+    取一批**已按日更新**的股票（自选股池）里最靠后的那个日期。
+    """
+    import watchlist_store as ws
+    cands = list(probe or []) + list(ws.load_watchlist())
+    best = None
+    for c in cands:
+        try:
+            df = load_kline(c)
+        except Exception:
+            continue
+        if df is None or df.empty:
+            continue
+        d = df["date"].iloc[-1].date()
+        if best is None or d > best:
+            best = d
+    return best
 
 
 def scan_stock(code, name, scan_date, window=DEFAULT_WINDOW,
@@ -205,15 +242,21 @@ def scan_stock(code, name, scan_date, window=DEFAULT_WINDOW,
     if min_amount and amt < min_amount:
         return [], "skip", "日均成交额 %.2f 亿 < %.2f" % (amt, min_amount)
 
-    gaps = sg.signal_gaps(code, [{"signal_date": r["date"], "signal_type": r["type"],
-                                  "confirm_date": cd} for r, cd in picked])
-    hits = [{
-        "stock_code": code, "stock_name": name,
-        "signal_date": r["date"], "confirm_date": cd,
-        "signal_type": r["type"], "is_primary": 1,
-        "zs_gap_days": gaps.get((r["date"], r["type"])),
-        "amount_yi": round(amt, 2),
-    } for r, cd in picked]
+    # 一次算出 gap 与 width（两者都依赖确认日结构），再合成打分
+    gw = sg.signal_gap_width(code, [{"signal_date": r["date"], "signal_type": r["type"],
+                                     "confirm_date": cd} for r, cd in picked])
+    hits = []
+    for r, cd in picked:
+        g = gw.get((r["date"], r["type"])) or {}
+        gap, wid = g.get("gap"), g.get("width")
+        hits.append({
+            "stock_code": code, "stock_name": name,
+            "signal_date": r["date"], "confirm_date": cd,
+            "signal_type": r["type"], "is_primary": 1,
+            "zs_gap_days": gap, "zs_width_pct": wid,
+            "score": sc.score_of(wid, gap),
+            "amount_yi": round(amt, 2),
+        })
     return hits, "ok", "%d 条" % len(hits)
 
 
@@ -223,12 +266,14 @@ def save_hits(scan_date, hits, db_path=None):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     rows = [(scan_date, h["stock_code"], h["stock_name"], h["signal_date"],
              h["confirm_date"], h["signal_type"], h["is_primary"],
-             h["zs_gap_days"], h["amount_yi"], ts) for h in hits]
+             h.get("zs_gap_days"), h.get("zs_width_pct"), h.get("score"),
+             h["amount_yi"], ts) for h in hits]
     with closing(connect(db_path)) as conn, conn:
         conn.executemany(
             "INSERT OR REPLACE INTO scan_results (scan_date, stock_code, stock_name,"
             " signal_date, confirm_date, signal_type, is_primary, zs_gap_days,"
-            " amount_yi, scanned_at) VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+            " zs_width_pct, score, amount_yi, scanned_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            rows)
     return len(rows)
 
 
@@ -251,7 +296,8 @@ def scan_market(scan_date=None, codes=None, limit=None, window=DEFAULT_WINDOW,
                 sleep=DEFAULT_SLEEP, resume=True, db_path=None, verbose=True):
     """批量扫描。每只扫完立刻落库 —— 中断了可以接着跑（默认跳过已完成的）。"""
     init_db(db_path)
-    sd = str(scan_date or last_trading_day())
+    # 扫描日 = **本地数据实际截止日**，不是日历上的今天（见 data_end_date 的注释）
+    sd = str(scan_date or data_end_date() or last_trading_day())
     uni = universe()
     if codes:
         want = set(codes)
@@ -306,9 +352,10 @@ def query_scan(scan_date=None, db_path=None, exclude_far=False, only_type=None,
             scan_date = r[0] if r and r[0] else None
         if scan_date is None:
             return [], None
+        # 默认按打分从高到低排 —— 这是「排」不是「筛」，和筛选条件叠加使用
         rows = [dict(x) for x in conn.execute(
             "SELECT * FROM scan_results WHERE scan_date=?"
-            " ORDER BY signal_type, stock_code", (scan_date,))]
+            " ORDER BY COALESCE(score,-1) DESC, signal_type, stock_code", (scan_date,))]
     if exclude_far:
         rows = [r for r in rows if r["zs_gap_days"] is None
                 or r["zs_gap_days"] < sg.GAP_THRESHOLD]

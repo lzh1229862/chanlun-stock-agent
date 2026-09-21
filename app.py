@@ -27,6 +27,7 @@ from analyzer import (analyze_stock, ensure_kline, generate_llm_summary, load_fr
                       load_ohlc)
 from fundamentals import fmt_num, fmt_pct, fmt_yi, fmt_yi_plain
 from storage_kline import load_kline
+from signal_score import label_of as score_label
 from structure_gap import GAP_THRESHOLD, label_of as gap_label
 from watchlist_store import (MAX_STOCKS, is_custom, load_default, load_watchlist,
                              parse_codes, reset_watchlist, save_watchlist, validate_codes)
@@ -190,10 +191,11 @@ def render_scan_page():
         return
 
     df = pd.DataFrame([{
+        "打分": score_label(r.get("score")),
         "代码": r["stock_code"], "名称": r["stock_name"], "类型": r["signal_type"],
         "信号日": r["signal_date"], "确认日": r["confirm_date"],
         "距中枢": gap_label(r["zs_gap_days"]), "成交额(亿)": r["amount_yi"],
-    } for r in sel])
+    } for r in sel])  # rows 已按 score 从高到低排
     ev = st.dataframe(df, width="stretch", hide_index=True, on_select="rerun",
                       selection_mode="single-row",
                       height=min(600, 80 + 35 * min(len(df), 15)))
@@ -207,6 +209,11 @@ def render_scan_page():
         st.session_state["_jump_code"] = str(df.iloc[picked[0]]["代码"])
         st.rerun()
 
+    st.caption("打分行 = 「中枢宽度 ≥ 0.12」+「距中枢结束 < 10 日」。"
+               "实测两个条件都满足的信号，5/10/20 日超额分别是 +3.23% / +3.42% / +3.90%，"
+               "比都不满足的高 +2.6% ~ +3.4%（三窗口置信区间都不跨 0、分半一致）。"
+               "⚠️ 这是**探索性**结论：两个因子各自经过预注册验证，但「组合」没有 —— "
+               "要成为正式结论必须再开一轮预注册（ADR-023）。")
     st.caption("点一行 → 跳转单股分析。本页只放代码 / 名称 / 类型 / 日期 / 距中枢 / 成交额；"
                "**不算回测、不抓基本面、不调 LLM** —— 那些点进去之后按需触发。")
     st.caption("提示：全市场原始命中通常上千条，务必用上面三个条件收窄 —— "

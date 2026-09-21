@@ -69,10 +69,25 @@ def signal_gaps(code, sigs, verbose=False):
         gap = 信号日 − 确认日结构里最后一个中枢的结束日（交易日数）
               None = 确认日缺失 / 该日无中枢 / 日期对不上
     """
+    return {k: v[0] for k, v in _gap_width(code, sigs, verbose=verbose).items()}
+
+
+def signal_gap_width(code, sigs, verbose=False):
+    """一次算出「距中枢结束天数」与「最近中枢宽度 ÷ 收盘价」。
+
+    两个都依赖**确认日的结构**，放一起算可省掉一次前缀重算。
+    返回 {(signal_date, signal_type): {"gap": g, "width": w}}
+    """
+    return {k: {"gap": v[0], "width": v[1]}
+            for k, v in _gap_width(code, sigs, verbose=verbose).items()}
+
+
+def _gap_width(code, sigs, verbose=False):
+    """内部实现：{(date,type): (gap, width)}。"""
     out = {}
     q = qfq_bars(code)
     if q.empty:
-        return {k: None for k in [(s["signal_date"], s["signal_type"]) for s in sigs]}
+        return {k: (None, None) for k in [(s["signal_date"], s["signal_type"]) for s in sigs]}
     pos = {str(d.date()): i for i, d in enumerate(q["date"])}
     cache = {}
     for s in sigs:
@@ -80,17 +95,22 @@ def signal_gaps(code, sigs, verbose=False):
         i = pos.get(s["signal_date"])
         ic = pos.get(s.get("confirm_date") or "")
         if i is None or ic is None:
-            out[key] = None
+            out[key] = (None, None)
             continue
         if ic not in cache:
             _, zss = structure_at(code, q, ic)
-            edt = pd.Timestamp(zss[-1]["edt"]).normalize() if zss else None
-            k = q.index[q["date"] == edt] if edt is not None else []
-            cache[ic] = int(k[0]) if len(k) else None
-        j = cache[ic]
-        out[key] = None if j is None else i - j
+            if zss:
+                z = zss[-1]
+                k = q.index[q["date"] == pd.Timestamp(z["edt"]).normalize()]
+                close = float(q.at[i, "close"])
+                cache[ic] = (int(k[0]) if len(k) else None,
+                             ((z["zg"] - z["zd"]) / close) if close else None)
+            else:
+                cache[ic] = (None, None)
+        j, w = cache[ic]
+        out[key] = (None if j is None else i - j, w)
     if verbose:
-        got = [v for v in out.values() if v is not None]
+        got = [v[0] for v in out.values() if v[0] is not None]
         print("    [structure_gap] %s 算了 %d 条（有效 %d）" % (code, len(out), len(got)))
     return out
 

@@ -34,8 +34,38 @@ import verify_edge as ve
 from verify_edge import mean_ci, pct, welch_diff_ci
 
 FEAT_PATH = Path("data/signal_features.parquet")
-HYP_PATH = Path("config/hypotheses.json")
+HYP_PATH = Path("config/hypotheses.json")          # 第 1 轮（兼容旧路径）
 PROMPT_PATH = Path("config/prompts/hypotheses.txt")
+
+
+def hyp_path(rnd):
+    return HYP_PATH if rnd == 1 else Path("config/hypotheses_r%d.json" % rnd)
+
+
+def hyp_result_path(rnd):
+    return Path("config/hypotheses_results.json") if rnd == 1 else \
+        Path("config/hypotheses_r%d_results.json" % rnd)
+
+
+def prompt_path(rnd):
+    return PROMPT_PATH if rnd == 1 else Path("config/prompts/hypotheses_r%d.txt" % rnd)
+
+
+def carry_over(rnd, ids):
+    """把上一轮某几条假设原样带进本轮（用于「重测」）。
+
+    重测必须**原样**：改一个阈值就不是重测了，是新的假设。
+    """
+    prev = json.loads(hyp_path(rnd - 1).read_text(encoding="utf-8"))
+    want = set(ids or [])
+    out = []
+    for h in prev["hypotheses"]:
+        if h["id"] in want:
+            h2 = dict(h)
+            h2["id"] = h["id"] + "R"
+            h2["retest_of"] = h["id"]
+            out.append(h2)
+    return out
 WINDOW = 5
 COST = 0.00202
 MIN_GROUP = 100
@@ -118,8 +148,8 @@ def cmd_gen(args):
     os.environ["DEEPSEEK_API_KEY"] = key
     import llm_client as L
 
-    system, user = read_prompt()
-    print("=== 调 %s 生成假设（prompt %d 字）===" % (L.MODEL, len(user)))
+    system, user = read_prompt(prompt_path(args.round))
+    print("=== 第 %d 轮  调 %s 生成假设（prompt %d 字）===" % (args.round, L.MODEL, len(user)))
     t0 = time.time()
     txt, usage, attempts = L.call_deepseek(user, system=system, timeout=args.timeout)
     print("  用时 %.1fs  尝试 %d 次  token %s" % (time.time() - t0, attempts, usage))
@@ -134,12 +164,24 @@ def cmd_gen(args):
         print("  原始回复已存 config/hypotheses.raw.txt，请人工检查")
         return 1
 
-    rec = {"generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "model": L.MODEL,
-           "prompt_file": str(PROMPT_PATH), "n": len(hs), "usage": usage,
-           "hypotheses": hs}
-    HYP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    HYP_PATH.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("  ✓ 已预注册 %d 条到 %s（本文件之后不得修改）" % (len(hs), HYP_PATH))
+    if args.carry_ids:
+        carried = carry_over(args.round, args.carry_ids.split(","))
+        errs2 = validate(carried)
+        if errs2:
+            print("  ✗ 结转假设校验不通过：%s" % errs2)
+            return 1
+        hs = hs + carried
+        print("  结转上一轮的 %s -> %s（原样重测）"
+              % (args.carry_ids, ",".join(h["id"] for h in carried)))
+
+    rec = {"round": args.round,
+           "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "model": L.MODEL,
+           "prompt_file": str(prompt_path(args.round)), "n": len(hs), "usage": usage,
+           "carried": args.carry_ids or "", "hypotheses": hs}
+    p = hyp_path(args.round)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("  ✓ 已预注册 %d 条到 %s（本文件之后不得修改）" % (len(hs), p))
     print()
     for h in hs:
         cond = " AND ".join(
@@ -210,17 +252,19 @@ def excess_of(sub, base, window):
 
 
 def cmd_test(args):
-    if not HYP_PATH.exists():
-        print("还没有预注册假设，先跑：python verify_hypotheses.py gen")
+    hp = hyp_path(args.round)
+    if not hp.exists():
+        print("还没有预注册假设，先跑：python verify_hypotheses.py gen --round %d" % args.round)
         return 1
-    rec = json.loads(HYP_PATH.read_text(encoding="utf-8"))
+    rec = json.loads(hp.read_text(encoding="utf-8"))
     hs = rec["hypotheses"]
     m = load_merged()
     w = args.window
     m = m[m["window"] == w]
     base = baseline_per_code(m, w)
     print("=== 数据裁决 ===")
-    print("假设来源：%s（%s，%s）" % (HYP_PATH, rec.get("generated_at"), rec.get("model")))
+    print("假设来源：%s（第 %s 轮，%s，%s）"
+          % (hp, rec.get("round", 1), rec.get("generated_at"), rec.get("model")))
     print("样本：%d 条回测记录 / %d 只股票 / 窗口 %d 日 / 基准股 %d 只"
           % (len(m), m["stock_code"].nunique(), w, len(base)))
     print("多重比较：测 %d 条，95%% 置信水平下**期望有 %.1f 条纯靠运气显著**；"
@@ -229,8 +273,9 @@ def cmd_test(args):
 
     cut = ve.split_point([{"entry_date": d} for d in m["entry_date"]], 0.6)
     print("  %-4s %-7s %-7s %-10s %-7s %-10s %-10s %-20s %-9s %s"
-          % ("id", "满足n", "不满足n", "满足超额", "不满足", "差值", "差值 95%CI",
+          % ("id", "满足n", "不满足n", "满足超额", "不满足", "超额差", "超额差 95%CI",
              "分半一致性", "扣费后", "判断"))
+    print("       （超额差 = 满足超额 − 不满足超额；CI 由两组均值差的 Welch 区间等宽平移而来）")
     results = []
     for h in hs:
         hi = m[m.apply(lambda r: match(r, h["when"]), axis=1)]
@@ -246,6 +291,13 @@ def cmd_test(args):
         rets_a, exc_a = ea
         rets_b, exc_b = eb
         d, dlo, dhi = welch_diff_ci(rets_a, rets_b)
+        # ⚠️ welch_diff_ci 给的是「**均值**差」，而旁边两列是「**超额**」（各自减了自己的基准）。
+        # 两者相差 = 两组基准之差。基准对给定分组是**常数**，所以区间宽度不变、只需平移中心。
+        # 报「超额差」才和旁边的列一致 —— 否则读者会看到 3.19% vs 1.00% 却写着差 0.55%。
+        d_exc = exc_a - exc_b
+        shift = d_exc - d
+        dlo, dhi = dlo + shift, dhi + shift
+        d = d_exc
         # 分半验证
         a1 = hi[hi["entry_date"] <= cut]
         a2 = hi[hi["entry_date"] > cut]
@@ -297,12 +349,12 @@ def cmd_test(args):
     print()
     print("  提醒：即使上面前 5 条全部成立，也要对照「期望 %.1f 条靠运气显著」这个基准再下结论。"
           % (0.05 * len(hs)))
-    Path("config/hypotheses_results.json").write_text(
+    hyp_result_path(args.round).write_text(
         json.dumps({"tested_at": time.strftime("%Y-%m-%d %H:%M:%S"), "window": w,
                     "n_rows": len(m), "bonferroni_alpha": 0.05 / len(hs),
                     "expected_false_positives": 0.05 * len(hs),
                     "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("  结果已存 config/hypotheses_results.json")
+    print("  结果已存 %s" % hyp_result_path(args.round))
     return 0
 
 
@@ -310,8 +362,12 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("gen")
+    g.add_argument("--round", type=int, default=1)
     g.add_argument("--timeout", type=float, default=240)
+    g.add_argument("--carry-ids", default=None,
+                   help="把上一轮这几条假设原样带进本轮重测，如 H4,H6")
     t = sub.add_parser("test")
+    t.add_argument("--round", type=int, default=1)
     t.add_argument("--window", type=int, default=WINDOW)
     a = ap.parse_args()
     return cmd_gen(a) if a.cmd == "gen" else cmd_test(a)
