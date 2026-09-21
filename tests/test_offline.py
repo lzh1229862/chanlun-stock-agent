@@ -1211,6 +1211,24 @@ class TestAppBoots(unittest.TestCase):
         self.assertEqual([r.label for r in at.sidebar.radio], ["模式"])
         self.assertIn("单股分析", at.sidebar.radio[0].options)
 
+    def test_rerun_with_cached_result(self):
+        """已经有结果时页面重跑，不能依赖 run_btn 分支里的局部变量。
+
+        回归：stock_score_history(code) 里的 code 原先只在「开始分析」分支里赋值，
+        于是任何别的重跑都会 NameError（用户是在点「生成 AI 总结」时撞上的）。
+        """
+        from streamlit.testing.v1 import AppTest
+        at = AppTest.from_file(str(Path(ROOT) / "app.py"))
+        at.session_state["res"] = {
+            "ok": True, "code": EMPTY_CODE, "name": "测试股",
+            "kline": {}, "structure": {}, "signals": [], "backtest": [],
+            "fundamentals": {}, "llm": {},
+        }
+        at.run(timeout=120)
+        self.assertEqual([str(e.value) for e in at.exception], [])
+        # 能拿到这个按钮，说明渲染确实走到了出问题的那一行之后
+        self.assertIn("生成 AI 总结", [b.label for b in at.button])
+
 
 class TestSkin(unittest.TestCase):
     """双皮肤：令牌完整性 + 图表配色（离线）。"""

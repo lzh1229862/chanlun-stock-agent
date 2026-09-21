@@ -648,6 +648,12 @@ if res is None:
     st.caption("非投资建议 · 不含自动下单 · 数据来源：本地 Parquet + SQLite")
     st.stop()
 
+# 页面重跑（点「生成 AI 总结」、切皮肤、展开 JSON…）不会再走上面 run_btn 那个分支，
+# 所以 code 必须从 res 里取回来。res 一直走 session_state，code 之前漏了 ——
+# 表现就是点 AI 总结时在第 04 节那里 NameError。
+# 回归用例：tests/test_offline.py::TestAppBoots::test_rerun_with_cached_result
+code = str(res.get("code") or "").strip()
+
 if not res.get("ok"):
     st.error(res.get("error") or "分析失败")
     st.stop()
