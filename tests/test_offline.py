@@ -894,6 +894,36 @@ SETTINGS_WITH_NAME = ('pool_name: "仓库样本池"' + chr(10)
                       + 'watchlist:' + chr(10) + '  - "600519"' + chr(10))
 
 
+class TestMultipleComparison(unittest.TestCase):
+    """多重比较台账（B5 / ADR-033）的 p 值反推与 BH-FDR。"""
+
+    def setUp(self):
+        import verify_multiple
+        self.vm = verify_multiple
+
+    def test_p_from_ci_matches_normal(self):
+        f = self.vm.p_from_ci
+        self.assertAlmostEqual(f(0.0, -0.0196, 0.0196), 1.0, places=6)   # 估计为 0 -> p=1
+        self.assertAlmostEqual(f(0.0196, 0.0, 0.0392), 0.05, places=2)   # |z|=1.96 -> p≈.05
+        self.assertIsNone(f(None, 0, 1))
+        self.assertIsNone(f(1, 1, 1))                                     # 零宽区间
+
+    def test_bh_finds_clear_signal(self):
+        items = [{"p": 0.0001}, {"p": 0.001}, {"p": 0.9}, {"p": 0.8}]
+        ok = self.vm.bh(items, q=0.05)
+        self.assertEqual(sum(1 for x in ok if x["discovery"]), 2)
+
+    def test_bh_rejects_all_when_nothing_significant(self):
+        items = [{"p": 0.4}, {"p": 0.6}, {"p": 0.9}]
+        ok = self.vm.bh(items, q=0.05)
+        self.assertEqual(sum(1 for x in ok if x["discovery"]), 0)
+
+    def test_bh_skips_none_p(self):
+        items = [{"p": None}, {"p": 0.0001}]
+        ok = self.vm.bh(items, q=0.05)
+        self.assertEqual(len(ok), 1)
+
+
 class TestLimitRoll(unittest.TestCase):
     """涨跌停顺延（B2 / ADR-030）。
 
