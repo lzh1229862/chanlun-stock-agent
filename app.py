@@ -54,7 +54,7 @@ def html(s):
 
 
 def is_night():
-    return st.session_state.get("skin", "night") == "night"
+    return st.session_state.get("skin", "day") == "night"
 
 
 def section(no, title, hint=""):
@@ -153,6 +153,95 @@ def warm_up(codes):
                 pass
     bar.progress(1.0, text="完成")
     return warmed, failed, rows
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def invalidated_signals(limit=5):
+    """B7：对比历史日报里的信号清单与当前库，找出「曾经播报、现在失效」的信号。
+
+    两种失效：
+      · 消失      —— 日报里有，当前库里查不到（笔被重划 / 历史数据被修正）
+      · 不可交易  —— 日报里 is_tradable=1，现在变成 0
+
+    实测**确认后**的信号改写率是 0（ADR-011 / verify_robustness 的 555 条 0 改写），
+    所以正常情况下这里应该是空的 —— 它是一个**安全网**，不是常规提醒。
+    """
+    from contextlib import closing
+
+    from storage_signal import connect
+    dates = list_daily_reports()[:limit]
+    seen = []
+    for d in dates:
+        p = REPORT_DIR / d / "signals.csv"
+        if not p.exists():
+            continue
+        try:
+            df = pd.read_csv(p, encoding="utf-8-sig", dtype=str)
+        except Exception:
+            continue
+        for r in df.to_dict("records"):
+            seen.append({"report": d,
+                         "code": str(r.get("stock_code", "")).strip().zfill(6),
+                         "date": str(r.get("signal_date", "")).strip(),
+                         "type": str(r.get("signal_type", "")).strip(),
+                         "was_tradable": str(r.get("is_tradable", "1")).strip() == "1"})
+    if not seen:
+        return []
+    codes = sorted({s["code"] for s in seen})
+    have = {}
+    try:
+        with closing(connect()) as conn:
+            q = ("SELECT stock_code, signal_date, signal_type, is_tradable FROM signals"
+                 " WHERE stock_code IN (%s)" % ",".join("?" * len(codes)))
+            for r in conn.execute(q, codes):
+                have[(r[0], r[1], r[2])] = r[3]
+    except Exception:
+        return []
+    out = []
+    for s in seen:
+        k = (s["code"], s["date"], s["type"])
+        if k not in have:
+            out.append({**s, "reason": "已消失（信号被重算掉）"})
+        elif s["was_tradable"] and not have[k]:
+            out.append({**s, "reason": "变为不可交易"})
+    return out
+
+
+def stock_score_history(code):
+    """B8：本股历史上按打分分组的表现。返回 [[打分, 窗口, 样本, 平均收益, 胜率], ...]"""
+    from contextlib import closing
+
+    from signal_score import label_of, score_of
+    from storage_signal import connect
+    sql = ("SELECT b.window AS w, b.return_pct AS r,"
+           " s.zs_gap_days AS g, s.zs_width_pct AS wd"
+           " FROM backtest b JOIN signals s"
+           "   ON s.stock_code=b.stock_code AND s.signal_date=b.signal_date"
+           "  AND s.signal_type=b.signal_type"
+           " WHERE b.stock_code=? AND b.scope='signal'")
+    try:
+        with closing(connect()) as conn:
+            rows = [dict(x) for x in conn.execute(sql, (code,))]
+    except Exception:
+        return []
+    if not rows:
+        return []
+    agg = {}
+    for r in rows:
+        s = score_of(r["wd"], r["g"])
+        agg.setdefault((s, r["w"]), []).append(r["r"])
+    out = []
+    for s in (2, 1, 0):
+        for w in (5, 10, 20):
+            v = agg.get((s, w))
+            if not v or len(v) < 3:
+                continue
+            ret = sum(v) / len(v)
+            win = sum(1 for x in v if x > 0) / len(v)
+            out.append([f'<span class="star">{label_of(s)}</span>', f"{w}日", len(v),
+                        f'<span class="{"chx-up" if ret >= 0 else "chx-down"}">{ret:+.2%}</span>',
+                        f"{win:.1%}"])
+    return out
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -310,6 +399,18 @@ def render_pool_page():
                f"共 {len(pool)} 只 · 「当日确认信号」= {_ad} 已确认且可交易的信号数"
                + (f"（池内合计 {_an} 条）" if _an else "")))
 
+    # —— 信号失效自检（B7）——
+    _inv = invalidated_signals()
+    if _inv:
+        st.warning(f"⚠️ 有 **{len(_inv)}** 条曾播报过的信号现在失效了")
+        html(table(["日报", "代码", "信号日", "类型", "失效原因"],
+                   [[esc(x["report"]), esc(x["code"]), esc(x["date"]), esc(x["type"]),
+                     f'<span class="tag warn">{esc(x["reason"])}</span>'] for x in _inv],
+                   "这些信号曾出现在上面的日报里，但当前库里查不到，或已从可交易变成不可交易。"))
+    else:
+        st.caption("信号失效自检：最近几份日报里的信号与当前库**完全一致（0 条失效）**。"
+                   "这是预期状态 —— 确认后的信号实测改写率为 0（ADR-011 的 555 条 0 改写）。")
+
     st.caption("编辑池内容（每行一个，或逗号 / 空格分隔）")
     text = st.text_area("股票代码", value=chr(10).join(pool), height=200,
                         key=f"pool_text_{ver}",
@@ -457,11 +558,19 @@ with st.sidebar:
     # 用 format_func 而不是改选项字符串：值保持干净，其它地方不用跟着解析后缀。
     _alert_day, _alert_n, _alert_by = pool_alerts()
 
+    _inv_n = len(invalidated_signals())
+
     def _mode_label(m):
-        return (m + " 🔴") if (m == "自选股与日报" and _alert_n) else m
+        if m != "自选股与日报":
+            return m
+        if _inv_n:
+            return m + " ⚠️"          # 曾播报的信号失效了 —— 这个比新信号更需要看
+        return (m + " 🔴") if _alert_n else m
 
     mode = st.radio("模式", _modes, key="mode_radio", format_func=_mode_label,
                     label_visibility="collapsed")
+    if _inv_n:
+        st.caption(f"⚠️ 有 **{_inv_n}** 条曾播报的信号已失效，去「自选股与日报」看")
     if _alert_n:
         st.caption(f"🔴 {_alert_day} 池内 **{_alert_n}** 条新确认信号"
                    f"（{'、'.join(sorted(_alert_by))}）")
@@ -490,10 +599,10 @@ with st.sidebar:
 
     # 皮肤开关放最下面：🌙 夜晚 / ☀️ 白天
     st.divider()
-    # 白天开关：未勾选 = 🌙 夜晚（默认），勾选 = ☀️ 白天
+    # 白天开关：勾选 = ☀️ 白天（默认），未勾选 = 🌙 夜晚
     with st.container(key="chx_skin"):
         day_on = st.checkbox("skin_day", label_visibility="collapsed",
-                             value=st.session_state.get("skin", "night") == "day",
+                             value=st.session_state.get("skin", "day") == "day",
                              key="skin_day_toggle")
     st.session_state["skin"] = "day" if day_on else "night"
 
@@ -780,6 +889,15 @@ if bt:
                "（价格下跌记为正）。样本少时不具解释力。"))
 else:
     st.info("无回测数据。")
+
+# —— 本股历史打分表现（B8）——
+_sc_hist = stock_score_history(code)
+if _sc_hist:
+    st.caption("**本股历史上按打分分组的表现**（只用这一只股票自己的历史信号）")
+    html(table(["打分", "窗口", "样本", "平均收益", "胜率"], _sc_hist,
+               "打分 = [中枢宽度 >= 0.12] + [距中枢结束 < 10 日]。"
+               "这是**本股**的数字，可能与全样本（ADR-024 检验期：★★ 约 +3.0%）差很多；"
+               "样本 <= 3 的格子已省略。"))
 
 # ==================== 第 5 步：LLM 按需生成 ====================
 html(section("05", "AI 总结", "按需生成 · 失败自动降级为规则结果"))

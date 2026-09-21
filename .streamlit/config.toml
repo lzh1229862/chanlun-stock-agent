@@ -1,12 +1,13 @@
 # 缠论分析 Agent - UI theme
-# Dark is the engineering baseline (night UI); the day UI is driven by the
-# CSS variable layer in skin.py. Native widgets (select popover, calendar,
-# dataframe canvas) inherit the base below.
+# **默认白天**：CSS 变量层（skin.py 的 LIGHT）负责页面主体，这里负责原生控件
+# （下拉弹层 / 日历 / dataframe 画布），两边必须同一套色，否则会一半白一半黑。
+# 夜晚 UI 由侧边栏左下角开关切换（纯 CSS 覆盖，不依赖这里的 base）。
 [theme]
-base = "dark"
-primaryColor = "#22D3EE"
-backgroundColor = "#0A101E"
-secondaryBackgroundColor = "#111A2E"
+base = "light"
+primaryColor = "#0E7490"
+backgroundColor = "#F4F7FC"
+secondaryBackgroundColor = "#EEF3FA"
+textColor = "#16233D"
 font = "sans-serif"
 
 [client]
