@@ -894,6 +894,35 @@ SETTINGS_WITH_NAME = ('pool_name: "仓库样本池"' + chr(10)
                       + 'watchlist:' + chr(10) + '  - "600519"' + chr(10))
 
 
+class TestRunQueue(unittest.TestCase):
+    """长任务队列（B9 / ADR-036）。只测注册表与查找，不真的跑任务。"""
+
+    def setUp(self):
+        import run_queue
+        self.q = run_queue
+
+    def test_task_ids_unique(self):
+        ids = [t['id'] for t in self.q.TASKS]
+        self.assertEqual(len(ids), len(set(ids)), ids)
+
+    def test_every_task_is_runnable(self):
+        for t in self.q.TASKS:
+            with self.subTest(tid=t['id']):
+                self.assertTrue(t['name'])
+                self.assertTrue(callable(t['progress']))
+                self.assertTrue(callable(t['run']))
+
+    def test_find(self):
+        self.assertIsNotNone(self.q.find('scan'))
+        self.assertIsNone(self.q.find('no-such-task'))
+
+    def test_survivorship_requires_upstream_done(self):
+        """上游没跑满时对比任务不能算「已完成」—— 否则队列会跳过它、留下部分样本的结果。"""
+        d, n = self.q.delist_compute_progress()
+        sd, _sn = self.q.surv_progress()
+        if n > 0 and d < n:
+            self.assertEqual(sd, 0)
+
 class TestMultipleComparison(unittest.TestCase):
     """多重比较台账（B5 / ADR-033）的 p 值反推与 BH-FDR。"""
 

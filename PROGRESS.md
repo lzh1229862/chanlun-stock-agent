@@ -51,6 +51,7 @@
 | 第 32 轮 | B7 信号失效提醒 + B8 本股打分历史 + 默认白天模式 | app.py / .streamlit/config.toml（ADR-034） |
 | 第 33 轮 | B6 幸存者偏差（252 只退市股，结论与预期相反） | verify_survivorship.py（ADR-035） |
 | 第 34 轮 | 全面自测 + 抓到退市股因子 bug 并重算 | delisted_pool.py / ADR-035 补记 |
+| 第 35 轮 | B9 统一长任务队列 | run_queue.py / run_queue.bat（ADR-036） |
 
 ## 当前状态
 
