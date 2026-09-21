@@ -34,6 +34,7 @@ from datetime import datetime
 import pandas as pd
 
 from confirm_dates import confirmation_delay
+from signal_filter import limit_ratio
 from storage_kline import load_kline
 from storage_signal import DB_PATH, connect, query_signals
 
@@ -66,8 +67,40 @@ CREATE INDEX IF NOT EXISTS idx_bt_scope ON backtest (scope, window, signal_type)
 """
 
 
+MAX_ROLL = 10          # 涨跌停顺延最多找几个交易日
+
+
 def direction_of(signal_type):
     return DIRECTION["买" if "买点" in signal_type else "卖"]
+
+
+def blocked_open(bars, i, direction, ratio, eps=1e-4):
+    """入场日**开盘**是否被限制在无法成交的方向上。
+
+    买点遇涨停开盘 -> 买不进；卖点遇跌停开盘 -> 卖不掉。
+    注意用的是「开盘价相对昨收」而不是「是否一字板」：
+    开盘就封在涨停价上时，模型假设的「按开盘价成交」根本拿不到货，所以一律顺延。
+    """
+    if i <= 0 or i >= len(bars):
+        return False
+    prev_close = float(bars.at[i - 1, "close"])
+    o = float(bars.at[i, "open"])
+    if prev_close <= 0:
+        return False
+    chg = o / prev_close - 1
+    return (chg >= ratio - eps) if direction > 0 else (chg <= -ratio + eps)
+
+
+def resolve_entry(bars, i, direction, ratio, max_roll=MAX_ROLL):
+    """开盘被涨跌停挡住时顺延到第一个能成交的交易日。
+
+    返回 (可成交的下标, 顺延了几个交易日)。价格口径不变 —— 仍是那一天的**开盘价**。
+    """
+    j, rolled = i, 0
+    while j < len(bars) and rolled < max_roll and blocked_open(bars, j, direction, ratio):
+        j += 1
+        rolled += 1
+    return j, rolled
 
 
 def get_bars(code):
@@ -123,7 +156,7 @@ def run_backtest(scope="signal", windows=WINDOWS, entry_mode=ENTRY_MODE, verbose
     for r in rows:
         by_code[r["stock_code"]].append(r)
 
-    out, skipped, delay_hist = [], 0, defaultdict(int)
+    out, skipped, delay_hist, roll_hist = [], 0, defaultdict(int), defaultdict(int)
     for code, sigs in sorted(by_code.items()):
         bars = get_bars(code)
         if bars.empty:
@@ -148,6 +181,13 @@ def run_backtest(scope="signal", windows=WINDOWS, entry_mode=ENTRY_MODE, verbose
             delay_hist[delay] += 1
 
             d = direction_of(r["signal_type"])
+            # 涨跌停顺延：开盘就封在涨停（买点）/ 跌停（卖点）时按开盘价成交是拿不到的
+            i_entry, rolled = resolve_entry(bars, i_entry, d, limit_ratio(code))
+            roll_hist[rolled] += 1
+            if i_entry >= len(bars):
+                skipped += len(windows)
+                continue
+
             for w in windows:
                 m = evaluate(bars, i_entry, w, d)
                 if m is None:
@@ -156,11 +196,14 @@ def run_backtest(scope="signal", windows=WINDOWS, entry_mode=ENTRY_MODE, verbose
                 out.append({"signal_id": r["id"], "stock_code": code,
                             "signal_date": r["signal_date"], "signal_type": r["signal_type"],
                             "scope": scope, "window": w, "confirm_delay": delay,
+                            "roll_days": rolled,
                             "confirm_date": str(bars.at[i + delay, "date"].date()), **m})
     if verbose:
+        rolled_n = sum(v for k, v in roll_hist.items() if k)
         print(f"  口径 {scope:<7} 信号 {len(rows):>3} 条 -> 生成 {len(out):>3} 行回测记录"
               f"   跳过（窗口未走完/无K线）{skipped} 条"
-              f"   确认延迟分布 {dict(sorted(delay_hist.items()))}")
+              f"   确认延迟分布 {dict(sorted(delay_hist.items()))}"
+              f"   涨跌停顺延 {rolled_n} 条 {dict(sorted((k, v) for k, v in roll_hist.items() if k))}")
     return out
 
 

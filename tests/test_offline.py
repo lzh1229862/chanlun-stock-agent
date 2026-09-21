@@ -894,6 +894,71 @@ SETTINGS_WITH_NAME = ('pool_name: "仓库样本池"' + chr(10)
                       + 'watchlist:' + chr(10) + '  - "600519"' + chr(10))
 
 
+class TestLimitRoll(unittest.TestCase):
+    """涨跌停顺延（B2 / ADR-030）。
+
+    买点遇涨停开盘买不进、卖点遇跌停开盘卖不掉，都要顺延到第一个能成交的交易日。
+    价格口径不变 —— 仍是那一天的**开盘价**。
+    """
+
+    @staticmethod
+    def _bars(opens, closes, highs=None, lows=None):
+        """逐日构造 K 线。**下标 0 是"前一日"**，它的收盘价就是下标 1 的昨收。"""
+        import pandas as pd
+        n = len(opens)
+        return pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=n, freq="D"),
+            "open": opens, "close": closes,
+            "high": highs if highs is not None else opens,
+            "low": lows if lows is not None else opens,
+            "volume": [1.0] * n, "amount": [1.0] * n, "qfq_factor": [1.0] * n,
+        })
+
+    def _bt(self):
+        import backtest
+        return backtest
+
+    def test_buy_blocked_by_limit_up_open(self):
+        bt = self._bt()
+        b = self._bars([10.0, 11.0], [10.0, 11.0])      # 昨收10 -> 开11 = 涨停
+        self.assertTrue(bt.blocked_open(b, 1, 1, 0.10))
+        self.assertFalse(bt.blocked_open(b, 1, -1, 0.10))   # 卖点不怕涨停
+
+    def test_sell_blocked_by_limit_down_open(self):
+        bt = self._bt()
+        b = self._bars([10.0, 9.0], [10.0, 9.0])        # 昨收10 -> 开9 = 跌停
+        self.assertTrue(bt.blocked_open(b, 1, -1, 0.10))
+        self.assertFalse(bt.blocked_open(b, 1, 1, 0.10))
+
+    def test_normal_open_not_blocked(self):
+        bt = self._bt()
+        b = self._bars([10.0, 10.5], [10.0, 10.5])
+        self.assertFalse(bt.blocked_open(b, 1, 1, 0.10))
+
+    def test_star_board_20pct_not_blocked_at_10pct(self):
+        """创业板 ±20% —— 10% 开盘在主板算涨停，在这里不算。"""
+        bt = self._bt()
+        b = self._bars([10.0, 11.0], [10.0, 11.0])
+        self.assertTrue(bt.blocked_open(b, 1, 1, 0.10))
+        self.assertFalse(bt.blocked_open(b, 1, 1, 0.20))
+
+    def test_resolve_entry_rolls_forward(self):
+        bt = self._bt()
+        # 连续两天涨停：10 -> 11 -> 12.1（各自以昨日收盘为基数 +10%），第 4 天才可成交
+        b = self._bars([10.0, 11.0, 12.1, 12.0], [10.0, 11.0, 12.1, 12.0])
+        j, rolled = bt.resolve_entry(b, 1, 1, 0.10)
+        self.assertEqual(rolled, 2)
+        self.assertEqual(j, 3)
+
+    def test_resolve_entry_stops_at_prev_close_zero(self):
+        """昨收为 0（脏数据）不能死循环。"""
+        bt = self._bt()
+        b = self._bars([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+        j, rolled = bt.resolve_entry(b, 1, 1, 0.10)
+        self.assertEqual(rolled, 0)
+        self.assertEqual(j, 1)
+
+
 class TestBatchQuote(unittest.TestCase):
     """批量行情的解析与「收盘守卫」（ADR-028）。
 
