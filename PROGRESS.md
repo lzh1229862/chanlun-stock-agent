@@ -27,6 +27,7 @@
 | 第 20 轮 | 打分的**时间样本外验证**（训练 15-20 / 检验 21-26） | `verify_score.py`（ADR-024） |
 | 第 21 轮 | 60 分钟级别共振验证 | `storage_minute.py` / `verify_minute.py`（ADR-025） |
 | 第 22 轮 | 打分接进单股路径（signals 表加 zs_width_pct）+ 修一个逐因子判定的真 bug | ADR-024 补记（T22） |
+| 第 23 轮 | 单因子 vs 组合的样本外对比 | verify_score_compare.py（ADR-026） |
 
 ## 当前状态
 

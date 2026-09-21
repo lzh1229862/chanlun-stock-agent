@@ -1,0 +1,38 @@
+{
+  "preregistered_at": "2026-09-21 10:06:57",
+  "question": "加上第二个因子有没有增量价值？组合在样本外是否优于单因子？",
+  "test_period": [
+    "2021-01-01",
+    "2026-12-31"
+  ],
+  "windows": [
+    5,
+    10,
+    20
+  ],
+  "hypotheses": [
+    {
+      "id": "H1",
+      "desc": "在 宽度>=0.12 组内，再加 距中枢<10 -> 更好",
+      "hi": "width>=thr AND gap<thr",
+      "lo": "width>=thr AND gap>=thr"
+    },
+    {
+      "id": "H2",
+      "desc": "在 距中枢<10 组内，再加 宽度>=0.12 -> 更好",
+      "hi": "gap<thr AND width>=thr",
+      "lo": "gap<thr AND width<thr"
+    },
+    {
+      "id": "H3",
+      "desc": "score=2（两个都满足）vs score=1（只满足一个）",
+      "hi": "score==2",
+      "lo": "score==1"
+    }
+  ],
+  "pass_criteria": {
+    "ci_excludes_zero": true,
+    "split_half_consistent": true
+  },
+  "note": "阈值 0.12/10 沿用 ADR-023/024 的预注册值，未在本轮重新挑选。"
+}
