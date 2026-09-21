@@ -894,6 +894,70 @@ SETTINGS_WITH_NAME = ('pool_name: "仓库样本池"' + chr(10)
                       + 'watchlist:' + chr(10) + '  - "600519"' + chr(10))
 
 
+class TestBatchQuote(unittest.TestCase):
+    """批量行情的解析与「收盘守卫」（ADR-028）。
+
+    收盘守卫是生死线：盘中拿到的 [3]/[33]/[34] 是未完成的当日 bar，
+    一旦写进本地就污染 K 线 -> 污染信号与回测。
+    """
+
+    @staticmethod
+    def _line(dt="20260921120537"):
+        """按**字段下标**显式构造一行，避免手写时数错位置。
+
+        实测布局：[1]名称 [2]代码 [3]当前价 [4]昨收 [5]今开
+                  [30]时间戳 [33]最高 [34]最低 [36]成交量(手) [37]成交额(万元)
+        """
+        f = ["1", "贵州茅台", "600519", "1251.57", "1257.12", "1259.00", "15049", "6652"]
+        f += ["0"] * (30 - len(f))                      # [8..29] 占位
+        f.append(dt)                                    # [30] 时间戳
+        f += ["-5.55", "-0.44"]                         # [31][32] 涨跌/涨跌%
+        f += ["1259.95", "1250.80"]                     # [33][34] 最高/最低
+        f += ["1251.57/15049/188652", "15049", "188652"]  # [35][36][37]
+        return 'v_sh600519="' + "~".join(f) + '"'
+
+    @property
+    def LINE_OPEN(self):
+        return self._line()
+
+    @property
+    def LINE_CLOSE(self):
+        return self._line("20260921150000")
+
+    def setUp(self):
+        import batch_quote
+        self.bq = batch_quote
+
+    def test_parse_line_fields(self):
+        b = self.bq.parse_line(self.LINE_OPEN)
+        self.assertEqual(b["code"], "600519")
+        self.assertEqual(b["name"], "贵州茅台")
+        self.assertEqual(b["open"], 1259.00)
+        self.assertEqual(b["prev_close"], 1257.12)
+        self.assertEqual(b["close"], 1251.57)
+        self.assertEqual(b["high"], 1259.95)
+        self.assertEqual(b["low"], 1250.80)
+        self.assertEqual(b["volume"], 15049 * 100)
+        self.assertEqual(b["amount"], 188652 * 10000)
+        self.assertEqual(b["dt"].strftime("%Y-%m-%d %H:%M:%S"), "2026-09-21 12:05:37")
+
+    def test_parse_line_garbage(self):
+        for bad in ("", "no quotes here", 'v_sh600519="1~2~3"', 'v_sh600519="1~贵州茅台~600519"'):
+            self.assertIsNone(self.bq.parse_line(bad), bad[:30])
+
+    def test_close_guard(self):
+        """盘中一律不算完成 —— 这条错了就会把半根 K 线写进库里。"""
+        self.assertFalse(self.bq.is_final(self.bq.parse_line(self.LINE_OPEN)))
+        self.assertTrue(self.bq.is_final(self.bq.parse_line(self.LINE_CLOSE)))
+        self.assertFalse(self.bq.is_final({"dt": None}))
+
+    def test_close_guard_boundary(self):
+        for hhmm, want in (("1459", False), ("1500", True), ("1501", True)):
+            b = self.bq.parse_line(self.LINE_OPEN.replace("20260921120537",
+                                                          "20260921" + hhmm + "00"))
+            self.assertEqual(self.bq.is_final(b), want, hhmm)
+
+
 class TestPoolName(unittest.TestCase):
     """股票池名称（UI 显示 + ADR 之外的补充功能）。
 

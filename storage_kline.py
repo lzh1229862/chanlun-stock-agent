@@ -20,6 +20,12 @@ DATA_DIR = Path("data/raw")
 COLUMNS = ["date", "open", "high", "low", "close", "volume", "amount", "qfq_factor"]
 RAW_COLUMNS = ["date", "open", "high", "low", "close", "volume", "amount"]
 
+# 前复权因子缓存（T26 / ADR-028）。
+# 因子是**阶梯函数**，只在除权除息日变化。原来每次 attach_factor 都从 1990 年重拉一遍，
+# 实测把日更从「每只 1 秒」拖到「每只 19 秒」、全市场外推 26.8 小时。加上缓存后每 7 天才重拉一次。
+FACTOR_DIR = Path("data/factor")
+FACTOR_TTL_DAYS = 7
+
 
 def ts_code(code):
     return ("sh" if code[0] == "6" else "sz") + code
@@ -63,13 +69,43 @@ def fetch_raw(code, start, end):
     return df
 
 
-def fetch_factor(code, start, end):
-    """前复权因子（阶梯函数，仅除权除息日有记录）。多取一段历史，保证窗口首日也能向前找到因子。"""
+def factor_path(code):
+    return FACTOR_DIR / f"{code}.parquet"
+
+
+def factor_fresh(code):
+    p = factor_path(code)
+    if not p.exists():
+        return False
+    return (time.time() - p.stat().st_mtime) / 86400.0 <= FACTOR_TTL_DAYS
+
+
+def fetch_factor(code, start, end, refresh=False):
+    """前复权因子（阶梯函数，仅除权除息日有记录）。
+
+    **带缓存**：TTL 见 FACTOR_TTL_DAYS。缓存存在的意义不是省一次请求 ——
+    实测逐只重拉 1990 年至今是日更的最大瓶颈（每只 1s -> 19s）。
+    refresh=True 或缓存过期时才真的走网络。
+    """
+    p = factor_path(code)
+    if not refresh and factor_fresh(code):
+        try:
+            c = pd.read_parquet(p)
+            c["date"] = pd.to_datetime(c["date"]).astype("datetime64[ns]")
+            return c.sort_values("date").reset_index(drop=True)
+        except Exception:
+            pass
     df = ak.stock_zh_a_daily(symbol=ts_code(code), start_date="1990-01-01",
                              end_date=end.strftime("%Y-%m-%d"), adjust="qfq-factor")
     df["date"] = pd.to_datetime(df["date"]).astype("datetime64[ns]")
     df["qfq_factor"] = df["qfq_factor"].astype(float)   # akshare 返回的是字符串
-    return df.sort_values("date").reset_index(drop=True)
+    out = df.sort_values("date").reset_index(drop=True)
+    try:
+        FACTOR_DIR.mkdir(parents=True, exist_ok=True)
+        out.to_parquet(p, index=False)
+    except Exception:
+        pass
+    return out
 
 
 def trade_dates(start, end):
@@ -131,6 +167,17 @@ def update_kline(code, start, end, verbose=True):
         chunk = fetch_raw(code, a, b)
         n_fetched += len(chunk)
         parts.append(chunk)
+
+    # 源头没有新数据（例如当天行情还没发布）且本地因子已完整 —— 直接返回，
+    # 不要再重算因子、重写整个 parquet。这一步在日更里是纯浪费（实测占大头）。
+    if n_fetched == 0 and n_local and "qfq_factor" in local.columns \
+            and local["qfq_factor"].notna().all():
+        dt0 = time.perf_counter() - t0
+        if verbose:
+            print(f"  源头无新数据，本地 {n_local} 行因子完整 -> 跳过合并与落盘   耗时 {dt0:.2f}s")
+        return local, {"fetched": 0, "local": n_local, "merged": n_local,
+                       "ranges": len(ranges), "skipped": False, "no_new_data": True,
+                       "seconds": dt0}
 
     if n_local:
         parts.insert(0, local[RAW_COLUMNS])

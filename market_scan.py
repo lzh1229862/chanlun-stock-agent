@@ -56,6 +56,7 @@ import pandas as pd
 
 import signal_score as sc
 import structure_gap as sg
+from batch_quote import merge_last_bars
 from confirm_dates import confirm_entry, load_frames
 from min_loop import build_signals
 from storage_kline import load_kline
@@ -293,7 +294,8 @@ def done_codes(scan_date, db_path=None):
 
 def scan_market(scan_date=None, codes=None, limit=None, window=DEFAULT_WINDOW,
                 min_amount=DEFAULT_MIN_AMOUNT, years=DEFAULT_YEARS,
-                sleep=DEFAULT_SLEEP, resume=True, db_path=None, verbose=True):
+                sleep=DEFAULT_SLEEP, resume=True, db_path=None, verbose=True,
+                batch=True):
     """批量扫描。每只扫完立刻落库 —— 中断了可以接着跑（默认跳过已完成的）。"""
     init_db(db_path)
     # 扫描日 = **本地数据实际截止日**，不是日历上的今天（见 data_end_date 的注释）
@@ -314,6 +316,14 @@ def scan_market(scan_date=None, codes=None, limit=None, window=DEFAULT_WINDOW,
     print("  窗口 = 最近 %d 个**已确认**交易日   流动性下限 = %.2f 亿   历史深度 = %d 年"
           % (window, min_amount, years))
     print()
+
+    # —— 阶段 1：批量补最后一根日线（ADR-028）——
+    # 日更时每只只需要那一根新 K 线。逐只发请求 = 5020 次；腾讯支持一次查 50 只 -> 约 100 次。
+    # 只在收盘后生效（盘中拿到的是未完成 bar）；缺更多天/除权除息的股票会自动交给逐只更新。
+    if batch and todo:
+        print("=== 批量补当日 K 线 ===")
+        merge_last_bars([c for c, _ in todo], verbose=verbose)
+        print()
 
     t0 = time.time()
     stats, n_hits = {"ok": 0, "skip": 0, "fail": 0}, 0
@@ -374,6 +384,8 @@ def main():
     ap.add_argument("--years", type=int, default=DEFAULT_YEARS)
     ap.add_argument("--sleep", type=float, default=DEFAULT_SLEEP)
     ap.add_argument("--no-resume", action="store_true")
+    ap.add_argument("--no-batch", action="store_true",
+                    help="不用批量行情补当日 K 线（默认用；只在收盘后生效）")
     ap.add_argument("--report", action="store_true", help="只看已扫结果")
     a = ap.parse_args()
 
@@ -403,7 +415,7 @@ def main():
     codes = [c.strip() for c in a.codes.split(",")] if a.codes else None
     scan_market(scan_date=a.scan_date, codes=codes, limit=a.limit, window=a.window,
                 min_amount=a.min_amount, years=a.years, sleep=a.sleep,
-                resume=not a.no_resume)
+                resume=not a.no_resume, batch=not a.no_batch)
     return 0
 
 
