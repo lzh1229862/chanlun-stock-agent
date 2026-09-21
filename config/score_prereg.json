@@ -1,0 +1,30 @@
+{
+  "preregistered_at": "2026-09-21 09:32:19",
+  "hypothesis": "打分高的信号，后续超额显著高于打分低的信号（score2 超额 > score0 超额）",
+  "score": "score = [zs_width_pct >= 0.12] + [0 <= zs_gap_days < 10]",
+  "thresholds": {
+    "zs_width_pct": 0.12,
+    "zs_gap_days": 10
+  },
+  "direction": "positive",
+  "train_period": [
+    "2015-01-01",
+    "2020-12-31"
+  ],
+  "test_period": [
+    "2021-01-01",
+    "2026-12-31"
+  ],
+  "windows": [
+    5,
+    10,
+    20
+  ],
+  "pass_criteria": {
+    "ci_excludes_zero_in_test": true,
+    "split_half_consistent_in_test": true,
+    "monotonic_2_gt_1_gt_0_in_test": true
+  },
+  "known_contamination": "阈值数值来自 ADR-023，而 ADR-023 用的是全样本（含检验期）。本验证仍带一层阈值选择的污染；比 ADR-023 强，但不是完全干净的样本外。",
+  "primary_metric": "检验期内 score2 超额 − score0 超额（各期基准在自己跨度内重算）"
+}
