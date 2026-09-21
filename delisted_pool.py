@@ -91,12 +91,13 @@ def fetch_one(code, verbose=False):
         return "fail", "%s: %s" % (type(e).__name__, str(e)[:50])
     if raw is None or len(raw) < MIN_BARS:
         return "empty", "%d 行" % (0 if raw is None else len(raw))
-    try:
-        fac = fetch_factor(code)
-        df = attach_factor(raw, fac)
-    except Exception:
-        df = raw.copy()
-        df["qfq_factor"] = 1.0
+    # ⚠️ 这里原来写的是 fetch_factor(code) —— 少传 start/end，TypeError 被 except 静默吞掉，
+    # 结果 252 只退市股全部存成了 qfq_factor=1.0（不复权）。除权缺口会造出假的下跌笔。
+    # 教训与 ADR-028 同一条：**宽泛的异常捕获会把「代码写错」伪装成「没有数据」**。
+    end = raw["date"].max().date() if not raw.empty else date(2026, 9, 18)
+    df = attach_factor(raw, code, end)
+    if "qfq_factor" not in df.columns or df["qfq_factor"].nunique() <= 1:
+        return "nofactor", "拿不到复权因子（qfq_factor 只有 1 个值）"
     DELISTED_DIR.mkdir(parents=True, exist_ok=True)
     df.to_parquet(DELISTED_DIR / ("%s.parquet" % code), index=False)
     return "ok", "%d 行 %s ~ %s" % (len(df), str(df["date"].min())[:10], str(df["date"].max())[:10])
