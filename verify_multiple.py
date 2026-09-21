@@ -171,6 +171,15 @@ def load_archived():
         {"id": "claim|" + k, "n": v.get("n"), "est": v.get("mean"),
          "lo": v.get("lo"), "hi": v.get("hi")}
         for k, v in (d.get("results") or {}).items() if v.get("lo") is not None])
+    # 第 3 轮假设：背驰强度（MACD 面积比），人工预注册
+    def ex_r3(d):
+        return [{"id": "R3|" + r["id"], "n": r.get("n_hi"), "est": r.get("diff"),
+                 "lo": r["ci"][0], "hi": r["ci"][1]} for r in d.get("results", [])
+                if r.get("ci") and r.get("diff") is not None]
+    out += from_json("config/hypotheses_r3_results.json",
+                     "F14 第3轮假设：背驰强度（MACD 面积比）", ex_r3)
+    out += from_json("config/hypotheses_r3_exploratory_results.json",
+                     "F15 第3轮探索性：二三类点（一类点已被硬过滤）", ex_r3)
     return out
 
 
@@ -265,6 +274,8 @@ ACCOUNTING = [
     ("F11 参数敏感性 min_bi_len/max_zs_bis/power_tol", 10, "未存 CI"),
     ("F12 60分钟级别共振 三窗口", 3, "未存 CI"),
     ("F13 B3 固定股票池 三窗口", 3, "未存 CI"),
+    ("F14 第3轮假设：背驰强度 主检验", 3, "存档"),
+    ("F15 第3轮探索性：一类点已过滤", 2, "存档"),
 ]
 
 

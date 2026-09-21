@@ -212,6 +212,30 @@ def match(row, when):
     return True
 
 
+def eligible(row, when):
+    """数值条件上取到 NaN 的行，**既不算满足也不算不满足**，直接剔除。
+
+    原来的逻辑把 NaN 判成「不满足」，于是「不满足组」里混进一批根本没有该特征的行
+    （新加的 macd_area_ratio 就有），差值的解释会被污染。NaN 在语义上是「未知」，
+    不属于任何一组。
+    """
+    for c in when:
+        if "in" in c:
+            continue
+        v = row.get(c["feature"])
+        if v is None or pd.isna(v):
+            return False
+    return True
+
+
+def sample_of(m, h):
+    """按假设里声明的 sample 限定样本（买点 / 卖点分开测时用）。"""
+    spec = h.get("sample") or {}
+    for k, v in spec.items():
+        m = m[m[k].isin(v)] if isinstance(v, list) else m[m[k] == v]
+    return m
+
+
 def load_merged():
     feats = pd.read_parquet(FEAT_PATH)
     conn = __import__("storage_signal").connect()
@@ -278,8 +302,14 @@ def cmd_test(args):
     print("       （超额差 = 满足超额 − 不满足超额；CI 由两组均值差的 Welch 区间等宽平移而来）")
     results = []
     for h in hs:
-        hi = m[m.apply(lambda r: match(r, h["when"]), axis=1)]
-        lo = m[~m.apply(lambda r: match(r, h["when"]), axis=1)]
+        mm = sample_of(m, h)
+        n_sub = len(mm)
+        keep = mm.apply(lambda r: eligible(r, h["when"]), axis=1)
+        mm = mm[keep]
+        hit = mm.apply(lambda r: match(r, h["when"]), axis=1)
+        hi, lo = mm[hit], mm[~hit]
+        if n_sub != len(m) or len(mm) != n_sub:
+            print("  %-4s 子样本 %d 条（剔除 NaN %d 条）" % (h["id"], len(mm), n_sub - len(mm)))
         if len(hi) < MIN_GROUP or len(lo) < MIN_GROUP:
             print("  %-4s 分组太小（%d / %d），跳过" % (h["id"], len(hi), len(lo)))
             results.append({"id": h["id"], "verdict": "分组太小"})

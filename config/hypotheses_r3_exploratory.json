@@ -1,0 +1,54 @@
+{
+  "round": 3,
+  "generated_at": "2026-09-21 15:45:45",
+  "model": "人工预注册（非 LLM 生成）",
+  "source": "R3 主检验失败后的机制追问",
+  "exploratory": true,
+  "post_hoc": true,
+  "n": 2,
+  "note": "⚠️ 事后分组，非预注册。R3-H1/H2/H3 全部不显著后，从 min_loop.build_signals 的代码里发现：一类买卖点**生成时就要求** power_price < 前一对比笔 * 0.97，即已含背驰硬过滤。因此面积比在一类点上方差被截断，真正可能有效的是定义中不含背驰的二、三类点。这 2 条计入全项目 FDR 台账。",
+  "hypotheses": [
+    {
+      "id": "R3-E1",
+      "hypothesis": "在二类+三类买卖点（生成时无背驰过滤）里，面积比 < 1 的信号超额收益更高",
+      "theory": "一类点已被背驰硬过滤，二三类点没有。若「力度衰减」真有信息，应当在这部分上显现。",
+      "when": [
+        {
+          "feature": "macd_area_ratio",
+          "op": "<",
+          "threshold": 1
+        }
+      ],
+      "sample": {
+        "signal_type": [
+          "第二类买点",
+          "第三类买点",
+          "第二类卖点",
+          "第三类卖点"
+        ]
+      },
+      "predict": "high",
+      "note": "探索性"
+    },
+    {
+      "id": "R3-E2",
+      "hypothesis": "在一类买卖点（已被背驰过滤）里，面积比不再有区分度",
+      "theory": "对照组：若这里也显著，说明 R3-E1 的机制解释站不住，多半是噪声。",
+      "when": [
+        {
+          "feature": "macd_area_ratio",
+          "op": "<",
+          "threshold": 1
+        }
+      ],
+      "sample": {
+        "signal_type": [
+          "第一类买点",
+          "第一类卖点"
+        ]
+      },
+      "predict": "low",
+      "note": "探索性；这里的 predict 含义是「预期无差异（不显著）」"
+    }
+  ]
+}

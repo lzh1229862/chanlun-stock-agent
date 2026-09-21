@@ -1240,3 +1240,70 @@ class TestSkin(unittest.TestCase):
         keys = {"up", "down", "bi", "zs", "buy", "sell", "grid", "axis", "line", "ring"}
         for c in (night, day):
             self.assertEqual(set(c), keys)
+
+class TestSignalFeatures(unittest.TestCase):
+    """背驰强度特征（ADR-037）：MACD 柱与「笔内面积」。"""
+
+    def setUp(self):
+        import signal_features
+        self.sf = signal_features
+
+    def _series(self, n=400, seed=7):
+        import numpy as np
+        rs = np.random.default_rng(seed)
+        px = 100 * np.cumprod(1 + rs.normal(0, 0.02, n))
+        return pd.DataFrame({
+            "date": pd.bdate_range("2020-01-01", periods=n),
+            "close": px,
+        })
+
+    def test_macd_hist_matches_manual(self):
+        q = self._series()
+        c = q["close"]
+        dif = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
+        dea = dif.ewm(span=9, adjust=False).mean()
+        got = self.sf.macd_hist(q)
+        self.assertEqual(len(got), len(q))
+        self.assertAlmostEqual(float((got - (dif - dea)).abs().max()), 0.0, places=9)
+
+    def test_prefix_equals_full_no_warmup(self):
+        """adjust=False 的递归从首值出发 -> 前缀重算与全序列逐点相同。
+
+        这是「特征只用确认日前缀」却不引入预热误差的依据；若这条挂了，
+        面积比就含有起始点依赖，得改成固定热身期。
+        """
+        q = self._series(seed=11)
+        full = self.sf.macd_hist(q)
+        for k in (30, 120, 399):
+            pre = self.sf.macd_hist(q.iloc[:k])
+            self.assertAlmostEqual(
+                float((pre - full.iloc[:k]).abs().max()), 0.0, places=9, msg="k=%d" % k)
+
+    def test_bi_area_sums_abs_hist_inclusive(self):
+        q = self._series(seed=3)
+        hist = self.sf.macd_hist(q)
+        b = type("B", (), {})()
+        b.sdt = q["date"].iloc[10]
+        b.edt = q["date"].iloc[20]
+        want = float(hist.iloc[10:21].abs().sum())
+        self.assertAlmostEqual(self.sf.bi_area(q, hist, b), want, places=9)
+
+    def test_bi_area_ignores_bars_outside(self):
+        """换掉区间外的柱值，面积不应变化（防止把整段前缀都算进去）。"""
+        q = self._series(seed=5)
+        hist = self.sf.macd_hist(q)
+        b = type("B", (), {})()
+        b.sdt = q["date"].iloc[200]
+        b.edt = q["date"].iloc[210]
+        base = self.sf.bi_area(q, hist, b)
+        dirty = hist.copy()
+        dirty.iloc[:150] = 999.0
+        self.assertAlmostEqual(self.sf.bi_area(q, dirty, b), base, places=9)
+
+    def test_bi_area_none_on_unknown_dates(self):
+        q = self._series(seed=2)
+        hist = self.sf.macd_hist(q)
+        b = type("B", (), {})()
+        b.sdt = pd.Timestamp("1999-01-01")
+        b.edt = pd.Timestamp("1999-02-01")
+        self.assertIsNone(self.sf.bi_area(q, hist, b))

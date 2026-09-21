@@ -54,6 +54,28 @@ def qfq_bars(code):
     return q
 
 
+def macd_hist(q, fast=12, slow=26, sig=9):
+    """MACD 柱（DIF - DEA）。
+
+    **只用传入的 bars** —— 调用方负责不要给未来数据。这里刻意不用 czsc 的 MACD，
+    因为它挂在 CZSC 对象上、和我们「按前缀重算」的口径不好对齐。
+    """
+    c = q["close"]
+    dif = c.ewm(span=fast, adjust=False).mean() - c.ewm(span=slow, adjust=False).mean()
+    dea = dif.ewm(span=sig, adjust=False).mean()
+    return dif - dea
+
+
+def bi_area(q, hist, b):
+    """一笔覆盖区间内 |MACD 柱| 之和 —— 缠论里「力度」的一种连续度量。"""
+    j = q.index[q["date"] == pd.Timestamp(b.sdt).normalize()]
+    k = q.index[q["date"] == pd.Timestamp(b.edt).normalize()]
+    if not len(j) or not len(k):
+        return None
+    seg = hist.iloc[int(j[0]):int(k[0]) + 1]
+    return float(seg.abs().sum()) if len(seg) else None
+
+
 def struct_at(code, q, i):
     """只用到第 i 根为止的 K 线算笔与中枢。"""
     import czsc
@@ -92,14 +114,32 @@ def features_row(code, q, i, i_asof, sig, reg_df):
     # --- 触发笔（signal_date = BI.edt）---
     # 注意：czsc 的笔端点**带时间分量**，必须 normalize 后才能和 Parquet 的零点日期比。
     bi_bars = bi_pct = None
-    for b in reversed(bis):
+    bi_idx = None
+    for k in range(len(bis) - 1, -1, -1):
+        b = bis[k]
         if str(pd.Timestamp(b.edt).date()) != date:
             continue
+        bi_idx = k
         j = q.index[q["date"] == pd.Timestamp(b.sdt).normalize()]
         if len(j):
             bi_bars = i - int(j[0]) + 1
             bi_pct = abs(float(b.change))
         break
+
+    # --- 背驰强度：触发笔 ÷ 上一同向笔 的 MACD 面积比（<1 表示背驰）---
+    # 已有的力度判定是 power_price / power_volume 的**硬阈值**（min_loop.POWER_TOL），
+    # 这里补一个**连续量**，才有可能用来排序。
+    # MACD 只算到**确认日**为止（与结构口径一致），不碰未来数据。
+    area_cur = area_prev = area_ratio = None
+    if bi_idx is not None:
+        hist = macd_hist(q.iloc[:i_asof + 1])
+        area_cur = bi_area(q, hist, bis[bi_idx])
+        for m in range(bi_idx - 1, -1, -1):
+            if str(bis[m].direction) == str(bis[bi_idx].direction):
+                area_prev = bi_area(q, hist, bis[m])
+                break
+        if area_cur is not None and area_prev:
+            area_ratio = area_cur / area_prev
 
     # --- 量价 ---
     win = q.iloc[max(0, i - 19):i + 1]
@@ -120,6 +160,8 @@ def features_row(code, q, i, i_asof, sig, reg_df):
     return {"stock_code": code, "signal_date": date, "signal_type": sig,
             "position": pos, "zs_gap_days": gap, "zs_width_pct": zw, "zs_n": zn,
             "bi_bars": bi_bars, "bi_pct": bi_pct,
+            "macd_area_cur": area_cur, "macd_area_prev": area_prev,
+            "macd_area_ratio": area_ratio,
             "vol_ratio_20": vol_ratio, "amount_yi": amount_yi, "mom_20": mom20,
             "vola_20": vola20, "dist_ma60": dist60,
             "board": board_of(code), "regime": mr.regime_on(reg_df, date)}
