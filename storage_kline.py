@@ -31,6 +31,14 @@ def ts_code(code):
     return ("sh" if code[0] == "6" else "sz") + code
 
 
+def to_qfq(raw):
+    """不复权 + qfq_factor -> 前复权帧（与 confirm_dates.load_frames 同口径）。"""
+    q = raw.copy()
+    for c in ("open", "high", "low", "close"):
+        q[c] = q[c] / q["qfq_factor"]
+    return q
+
+
 def parquet_path(code):
     return DATA_DIR / f"{code}.parquet"
 
@@ -58,8 +66,8 @@ def save_kline(code, df):
 
 # ============ 数据获取 ============
 
-def fetch_raw(code, start, end):
-    """腾讯源，【不复权】日线。"""
+def _tx_raw(code, start, end):
+    """腾讯源，【不复权】日线。内置数据源的实现，一般不要直接调。"""
     df = ak.stock_zh_a_hist_tx(symbol=ts_code(code), start_date=start.strftime("%Y%m%d"),
                                end_date=end.strftime("%Y%m%d"), adjust="")
     if df is None or len(df) == 0:
@@ -67,6 +75,21 @@ def fetch_raw(code, start, end):
     df = df[["date", "open", "high", "low", "close", "volume", "amount"]].copy()
     df["date"] = pd.to_datetime(df["date"]).astype("datetime64[ns]")
     return df
+
+
+def fetch_raw(code, start, end):
+    """活动数据源的【不复权】日线（ADR-039）。默认 = 腾讯。"""
+    import datasource as ds
+    return ds.normalize_kline(ds.active().kline(code, start, end))
+
+
+def _sina_factor(code, end):
+    """新浪源，前复权因子（阶梯函数）。内置数据源的实现，一般不要直接调。"""
+    df = ak.stock_zh_a_daily(symbol=ts_code(code), start_date="1990-01-01",
+                             end_date=end.strftime("%Y-%m-%d"), adjust="qfq-factor")
+    if df is None or len(df) == 0:
+        return pd.DataFrame(columns=["date", "qfq_factor"])
+    return df[["date", "qfq_factor"]].copy()
 
 
 def factor_path(code):
@@ -95,11 +118,10 @@ def fetch_factor(code, start, end, refresh=False):
             return c.sort_values("date").reset_index(drop=True)
         except Exception:
             pass
-    df = ak.stock_zh_a_daily(symbol=ts_code(code), start_date="1990-01-01",
-                             end_date=end.strftime("%Y-%m-%d"), adjust="qfq-factor")
-    df["date"] = pd.to_datetime(df["date"]).astype("datetime64[ns]")
-    df["qfq_factor"] = df["qfq_factor"].astype(float)   # akshare 返回的是字符串
-    out = df.sort_values("date").reset_index(drop=True)
+    import datasource as ds
+    out = ds.normalize_factor(ds.active().factor(code, start, end))
+    if len(out) == 0:
+        return pd.DataFrame(columns=["date", "qfq_factor"])
     try:
         FACTOR_DIR.mkdir(parents=True, exist_ok=True)
         out.to_parquet(p, index=False)
@@ -117,23 +139,32 @@ def trade_dates(start, end):
     return list(m.trade_date)
 
 
-def attach_factor(df, code, end):
-    """按日期前向填充 qfq_factor。"""
-    if len(df) == 0:
+def merge_factor(df, f):
+    """把（阶梯函数形式的）复权因子前向填充进 K 线。`f` 为空 -> 全部按 1.0。
+
+    抽出来是为了让**别的数据源**也能复用同一套填充逻辑
+    （`verify_datasource.py` 拿它把任意来源的 raw + factor 拼成前复权帧）。
+    """
+    if df is None or len(df) == 0:
         return df
-    f = fetch_factor(code, None, end)
-    if len(f) == 0:
-        df = df.copy()
-        df["qfq_factor"] = 1.0
-        return df
-    left = df.copy()
-    left["date"] = pd.to_datetime(left["date"]).astype("datetime64[ns]")
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"]).astype("datetime64[ns]")
+    if f is None or len(f) == 0:
+        out["qfq_factor"] = 1.0
+        return out
     right = f.copy()
     right["date"] = pd.to_datetime(right["date"]).astype("datetime64[ns]")
-    merged = pd.merge_asof(left.sort_values("date"), right, on="date", direction="backward")
+    merged = pd.merge_asof(out.sort_values("date"), right, on="date", direction="backward")
     if merged["qfq_factor"].isna().any():
-        merged["qfq_factor"] = merged["qfq_factor"].fillna(f["qfq_factor"].iloc[0])
+        merged["qfq_factor"] = merged["qfq_factor"].fillna(right["qfq_factor"].iloc[0])
     return merged
+
+
+def attach_factor(df, code, end):
+    """按日期前向填充 qfq_factor（自动取因子）。"""
+    if len(df) == 0:
+        return df
+    return merge_factor(df, fetch_factor(code, None, end))
 
 
 # ============ T3-2：增量更新 ============

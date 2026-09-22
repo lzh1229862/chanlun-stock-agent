@@ -138,20 +138,24 @@ def ok_code(code, name):
     return "ST" not in n and "退" not in n
 
 
-def universe(limit=None):
-    """全市场可扫标的：排除北交所 / ST / 退市。返回 [(code, name), ...]
-
-    用**白名单**前缀（60/68/00/30）而不是黑名单 —— 踩过坑：北交所现在也用 92 开头。
-    """
+def _ak_universe():
+    """akshare 全市场名录（**原样**，不预先过滤）。内置数据源的实现。"""
     import akshare as ak
     df = ak.stock_info_a_code_name()
     df.columns = ["code", "name"]
     df["code"] = df["code"].astype(str).str.zfill(6)
-    out = []
-    for _, r in df.iterrows():
-        code, name = r["code"], str(r["name"]).replace(" ", "")
-        if ok_code(code, name):
-            out.append((code, name))
+    return [(r["code"], str(r["name"]).replace(" ", "")) for _, r in df.iterrows()]
+
+
+def universe(limit=None):
+    """全市场可扫标的：排除北交所 / ST / 退市。返回 [(code, name), ...]
+
+    **过滤是我们的规则，不是数据源的事** —— 数据源只管给出原始名录（ADR-039）。
+    用**白名单**前缀（60/68/00/30）而不是黑名单 —— 踩过坑：北交所现在也用 92 开头。
+    """
+    import datasource as ds
+    raw = ds.active().universe()
+    out = [(c, n) for c, n in raw if ok_code(c, n)]
     out.sort()
     return out[:limit] if limit else out
 

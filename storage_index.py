@@ -54,11 +54,28 @@ def load_index(code):
     return df.sort_values("date").reset_index(drop=True)
 
 
-def fetch_index(code):
-    """新浪全历史指数日线。"""
+def _sina_index(code):
+    """新浪全历史指数日线。内置数据源的实现，一般不要直接调。"""
     import akshare as ak
     df = ak.stock_zh_index_daily(symbol=symbol_of(code))
     if df is None or df.empty:
+        return pd.DataFrame(columns=COLUMNS)
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"]).astype("datetime64[ns]")
+    for c in ("open", "high", "low", "close", "volume"):
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    for c in COLUMNS:
+        if c not in out.columns:
+            out[c] = pd.NA
+    return out[COLUMNS].dropna(subset=["close"]).sort_values("date").reset_index(drop=True)
+
+
+def fetch_index(code):
+    """活动数据源的指数日线（ADR-039）。默认 = 新浪。"""
+    import datasource as ds
+    df = ds.active().index_kline(code)
+    if df is None or len(df) == 0:
         return pd.DataFrame(columns=COLUMNS)
     out = df.copy()
     out["date"] = pd.to_datetime(out["date"]).astype("datetime64[ns]")

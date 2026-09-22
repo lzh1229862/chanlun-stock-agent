@@ -48,7 +48,7 @@
 | 统计样本 | **45 只 x 11 年**（2015~2026）· 4184 条信号 · 24207 条回测 |
 | 退市股池 | **252 只**（2015 年后退市，历史行情 252/252 全部取到） |
 | 单元测试 | **143 项**，全离线，约 4 秒 |
-| 技术决策记录 | **35 条** ADR + 7 处补记 |
+| 技术决策记录 | **36 条** ADR + 7 处补记 |
 | 每日全流程 | **约 12 分钟**（含批量行情补当日 K 线） |
 
 ---
@@ -126,6 +126,45 @@ python market_scan.py --report                # 只看已扫结果
 | 60 分钟 | 新浪 `stock_zh_a_minute`（**固定只给 1970 根 ≈ 2 年**） |
 | 基本面 | 巨潮（概况/行业）+ 同花顺（财务）+ 腾讯（估值） |
 | 批量当日行情 | 腾讯行情一次查 50 只，**只在收盘后用** |
+
+### 换成你自己的数据源（ADR-039）
+
+上面这套只是**默认实现**。任何有别的源（Tushare / Wind / 掘金 / 自建库 / CSV）的人
+都可以在 `providers/` 下放一个模块接上，只**必须实现一个方法**：
+
+```python
+import datasource as ds
+
+class MySource(ds.DataSource):
+    name = "my_source"
+    provides = ("kline",)          # 还有 factor / index_kline / universe 可选
+
+    def kline(self, code, start, end):        # 不复权日线
+        ...                                    # 列 = RAW_COLUMNS，date 升序无重复
+        return df                              # volume 单位股，amount 单位元
+
+ds.register(MySource())
+```
+
+`providers/example_csv.py` 是一个可以直接照抄的完整示例（读本地 CSV）。
+启用：`config/settings.yaml` 里写 `datasource: {name: my_source}`，
+或者临时 `python verify_datasource.py --provider my_source`。
+
+**接完一定要跑一致性检查**：
+
+```bash
+python verify_datasource.py --provider my_source     # 契约 / 价格交叉对比 / 信号一致性
+python verify_datasource.py --noise                  # 规则对数据精度的敏感度
+```
+
+它会告诉你两件事，第二件比第一件重要：
+
+1. 你的返回符不符合约定、和内置源的价格差多少
+2. **同一套缠论规则在两个源上给出的买卖点差多少** —— 差太多就不能沿用本项目的统计结论
+
+⚠️ 顺带量出来的一个事实：**这套规则对数据精度极脆**。逐日只差 0.02%，
+买卖点就变掉约 16%；差 0.1% 时只剩 63% 一致。而**整体等比缩放 3% 却一个都不改**
+（等比是单调变换）。详见 ADR-039。
 
 ## 存储（都已被 gitignore）
 
@@ -217,6 +256,9 @@ python -m unittest discover -s tests      # 143 项离线单测，约 4 秒
 - **没有实盘验证**：全部是回测
 - **交易成本是假设值**：滑点分层表（5 档）没经过实盘校准
 - **数据源单点**：腾讯 + 新浪，无备用源；批处理失败无告警
+- ⚠️ **单个信号对数据精度极脆**：逐日 0.02% 的噪声就改掉约 16% 的买卖点，
+  0.1% 时只剩 63% 一致；而我们的价格与因子口径本来就差约 0.37%（ADR-002）。
+  **聚合统计大概率仍稳，但这一点尚未验证** —— 见 ADR-039，列为下一轮第一件事
 - **周线/60 分钟共振均未获支持**：多级别这条路在日线信号上目前没有正面证据
 
 ---

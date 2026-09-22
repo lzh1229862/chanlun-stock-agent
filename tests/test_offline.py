@@ -1448,3 +1448,135 @@ class TestIndustry(unittest.TestCase):
             self.assertEqual(ms.concentration_rows("2026-09-21"), [])
         finally:
             self.im.load_map = saved
+
+class TestDataSource(unittest.TestCase):
+    """数据源抽象（ADR-039）。"""
+
+    def setUp(self):
+        import datasource
+        self.ds = datasource
+        self.ds.reset()
+
+    def tearDown(self):
+        # reset 清空了注册表，必须 force 才能把 providers/ 装回来
+        self.ds.discover(force=True)
+        self.ds._ACTIVE = None
+
+    def _frame(self, n=3):
+        import pandas as pd
+        return pd.DataFrame({
+            "date": pd.bdate_range("2024-01-02", periods=n),   # n 大了要真日期序列
+            "open": [1.0 + i for i in range(n)], "high": [2.0 + i for i in range(n)],
+            "low": [0.5 + i for i in range(n)], "close": [1.5 + i for i in range(n)],
+            "volume": [100.0 + i for i in range(n)],
+            "amount": [1e6 + i for i in range(n)]})
+
+    def test_bare_source_raises_not_supported(self):
+        class Bare(self.ds.DataSource):
+            name = "bare"
+        b = Bare()
+        self.assertFalse(b.supports("kline"))
+        with self.assertRaises(self.ds.NotSupported):
+            b.kline("600519", "2024-01-01", "2024-12-31")
+        # 没因子不是错误，是「这个源没有」
+        self.assertIsNone(b.factor("600519", None, None))
+
+    def test_register_get_and_available(self):
+        class One(self.ds.DataSource):
+            name = "one"
+            provides = ("kline",)
+        self.ds.register(One())
+        self.assertEqual(self.ds.get("one").name, "one")
+        self.assertIn("one", self.ds.available())
+        self.assertTrue(self.ds.get("one").supports("kline"))
+
+    def test_get_unknown_raises_with_list(self):
+        self.ds.register(type("X", (self.ds.DataSource,), {"name": "x"})())
+        with self.assertRaises(KeyError) as cm:
+            self.ds.get("不存在")
+        self.assertIn("x", str(cm.exception))
+
+    def test_providers_discovered(self):
+        self.assertIn("builtin", self.ds.available())
+        self.assertEqual(self.ds.load_errors(), [])
+
+    def test_normalize_kline_sorts_dedups_and_casts(self):
+        import pandas as pd
+        df = self._frame(3)
+        df = pd.concat([df, df.iloc[[0]]], ignore_index=True)     # 重复
+        df = df.iloc[::-1]                                        # 倒序
+        out = self.ds.normalize_kline(df)
+        self.assertEqual(len(out), 3)
+        self.assertTrue(out["date"].is_monotonic_increasing)
+        self.assertEqual(out["close"].dtype, float)
+        self.assertEqual(list(out.columns), self.ds.RAW_COLUMNS)
+
+    def test_normalize_kline_empty_keeps_columns(self):
+        out = self.ds.normalize_kline(None)
+        self.assertEqual(len(out), 0)
+        self.assertEqual(list(out.columns), self.ds.RAW_COLUMNS)
+
+    def test_normalize_factor_drops_bad_rows(self):
+        import pandas as pd
+        df = pd.DataFrame({"date": ["2024-01-02", "2024-01-03"],
+                           "qfq_factor": ["1.0", "abc"]})     # akshare 的因子是字符串
+        out = self.ds.normalize_factor(df)
+        self.assertEqual(len(out), 1)
+        self.assertAlmostEqual(float(out["qfq_factor"].iloc[0]), 1.0)
+
+    def test_fetch_raw_goes_through_active_source(self):
+        """接线点：storage_kline.fetch_raw 必须走活动数据源，不能还硬编码腾讯。"""
+        import pandas as pd
+
+        import storage_kline as sk
+
+        frame = self._frame(2)
+
+        class Fake(self.ds.DataSource):
+            name = "fake"
+            provides = ("kline",)
+
+            def kline(self, code, start, end):
+                return frame
+
+        self.ds.register(Fake())
+        self.ds.use("fake")
+        out = sk.fetch_raw("600519", pd.Timestamp("2024-01-01"),
+                           pd.Timestamp("2024-01-05"))
+        self.assertEqual(len(out), 2)
+        self.assertEqual(list(out.columns), self.ds.RAW_COLUMNS)
+
+    def test_noisy_source_is_deterministic_and_keeps_ohlc_sane(self):
+        import verify_datasource as vd
+
+        class Flat(self.ds.DataSource):
+            name = "flat"
+            provides = ("kline",)
+
+            def kline(self, code, start, end):
+                return self._f
+
+        s = Flat()
+        s._f = self._frame(50)
+        n = vd.NoisySource(s, sigma=0.001, seed=7)
+        a = n.kline("600519", "2024-01-01", "2024-12-31")
+        b = n.kline("600519", "2024-01-01", "2024-12-31")
+        self.assertTrue(a.equals(b), "同一只股票两次结果必须一样")
+        self.assertFalse(a["close"].equals(s._f["close"]), "噪声没生效")
+        self.assertTrue((a["high"] >= a[["open", "close", "low"]].max(axis=1) - 1e-9).all())
+        self.assertTrue((a["low"] <= a[["open", "close", "high"]].min(axis=1) + 1e-9).all())
+
+    def test_contract_check_catches_violations(self):
+        import verify_datasource as vd
+        good = self._frame(3)
+        self.assertEqual(vd.contract_check(good), [])
+        self.assertIn("None", vd.contract_check(None)[0])
+        bad = good.drop(columns=["amount"])
+        self.assertIn("缺列", vd.contract_check(bad)[0])
+        rev = good.iloc[::-1].reset_index(drop=True)
+        self.assertTrue(any("升序" in x for x in vd.contract_check(rev)))
+        dup = pd.concat([good, good.iloc[[0]]], ignore_index=True)
+        self.assertTrue(any("重复" in x for x in vd.contract_check(dup)))
+        broken = good.copy()
+        broken.loc[0, "high"] = broken.loc[0, "low"] - 1
+        self.assertTrue(any("high" in x for x in vd.contract_check(broken)))

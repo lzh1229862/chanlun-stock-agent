@@ -1,0 +1,167 @@
+{
+  "checked_at": "2026-09-22 12:51:40",
+  "provider": "local_csv",
+  "builtin": "builtin",
+  "start": "2023-01-01",
+  "end": "2026-09-22",
+  "codes": [
+    "600519",
+    "300750",
+    "002594"
+  ],
+  "thresholds": {
+    "price_median": 0.001,
+    "price_p95": 0.01,
+    "signal_jaccard": 0.9
+  },
+  "verdict": {
+    "price_ok": true,
+    "signal_ok": true
+  },
+  "rows": [
+    {
+      "code": "600519",
+      "provider_error": null,
+      "builtin_error": null,
+      "n_provider": 902,
+      "n_builtin": 902,
+      "contract": [],
+      "dates_only_provider": 0,
+      "dates_only_builtin": 0,
+      "raw_close": {
+        "n": 902,
+        "median": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "worst": [
+        {
+          "date": "2023-01-03",
+          "provider": 1730.01,
+          "builtin": 1730.01,
+          "rel": 0.0
+        },
+        {
+          "date": "2023-01-04",
+          "provider": 1725.01,
+          "builtin": 1725.01,
+          "rel": 0.0
+        },
+        {
+          "date": "2023-01-05",
+          "provider": 1801.0,
+          "builtin": 1801.0,
+          "rel": 0.0
+        }
+      ],
+      "qfq_close": {
+        "n": 902,
+        "median": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "signals_provider": 25,
+      "signals_builtin": 25,
+      "jaccard": 1.0,
+      "only_provider": [],
+      "only_builtin": [],
+      "seconds": 3.16
+    },
+    {
+      "code": "300750",
+      "provider_error": null,
+      "builtin_error": null,
+      "n_provider": 902,
+      "n_builtin": 902,
+      "contract": [],
+      "dates_only_provider": 0,
+      "dates_only_builtin": 0,
+      "raw_close": {
+        "n": 902,
+        "median": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "worst": [
+        {
+          "date": "2023-01-03",
+          "provider": 389.64,
+          "builtin": 389.64,
+          "rel": 0.0
+        },
+        {
+          "date": "2023-01-04",
+          "provider": 384.01,
+          "builtin": 384.01,
+          "rel": 0.0
+        },
+        {
+          "date": "2023-01-05",
+          "provider": 407.51,
+          "builtin": 407.51,
+          "rel": 0.0
+        }
+      ],
+      "qfq_close": {
+        "n": 902,
+        "median": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "signals_provider": 34,
+      "signals_builtin": 34,
+      "jaccard": 1.0,
+      "only_provider": [],
+      "only_builtin": [],
+      "seconds": 3.6
+    },
+    {
+      "code": "002594",
+      "provider_error": null,
+      "builtin_error": null,
+      "n_provider": 902,
+      "n_builtin": 902,
+      "contract": [],
+      "dates_only_provider": 0,
+      "dates_only_builtin": 0,
+      "raw_close": {
+        "n": 902,
+        "median": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "worst": [
+        {
+          "date": "2023-01-03",
+          "provider": 260.48,
+          "builtin": 260.48,
+          "rel": 0.0
+        },
+        {
+          "date": "2023-01-04",
+          "provider": 259.1,
+          "builtin": 259.1,
+          "rel": 0.0
+        },
+        {
+          "date": "2023-01-05",
+          "provider": 265.08,
+          "builtin": 265.08,
+          "rel": 0.0
+        }
+      ],
+      "qfq_close": {
+        "n": 902,
+        "median": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "signals_provider": 31,
+      "signals_builtin": 31,
+      "jaccard": 1.0,
+      "only_provider": [],
+      "only_builtin": [],
+      "seconds": 3.89
+    }
+  ]
+}

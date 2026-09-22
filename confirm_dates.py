@@ -34,10 +34,8 @@ def load_frames(code):
     if df.empty:
         return df, df
     raw = df.sort_values("date").reset_index(drop=True)
-    q = raw.copy()
-    for c in ("open", "high", "low", "close"):
-        q[c] = q[c] / q["qfq_factor"]
-    return raw, q
+    from storage_kline import to_qfq
+    return raw, to_qfq(raw)
 
 
 def compute_signals(bars_sub, code):

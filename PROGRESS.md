@@ -56,6 +56,7 @@
 | 第 37 轮 | 修复「生成 AI 总结」的 NameError（code 没走 session_state）+ 补回归测试 | app.py / tests/test_offline.py（ADR-034 补记） |
 | 第 38 轮 | 全市场扫描跑完（5021 只，覆盖 99.96%）+ 修「失败被当成已完成」的续跑 bug | market_scan.py / tests/test_offline.py（ADR-022 补记） |
 | 第 39 轮 | 行业字段接进扫描 + 集中度口径（lift）+ 推翻我自己的行业判断 | industry.py / market_scan.py / app.py（ADR-038） |
+| 第 40 轮 | 数据源抽象（四方法协议 + providers 自动发现 + 一致性检查器） | datasource.py / providers/ / verify_datasource.py（ADR-039） |
 
 ## 当前状态
 
@@ -276,6 +277,7 @@
 - [ ] F5.4 K 线独立大图 / 多周期（P2）
 - [ ] **背驰硬过滤的消融实验**：把 `power_tol` 放到 1.0（完全不要求背驰），看一类买卖点是否变差。
       ADR-037 只证了「背驰之上再叠一层软度量没用」，没证 `POWER_TOL=0.03` 本身值不值 —— 两件事不一样
+- [ ] **换源重跑 `verify_claims`**，验证「聚合统计对数据精度稳健」这个推测（ADR-039 遗留）
 - [ ] 竞品可借鉴但未做：流通盘分档 / 中枢区间展示 / 个股走势状态
 - [x] ~~行业中性化体检~~ → 第 39 轮做了行业字段与集中度（ADR-038），实测门类 lift 几乎全 1.0，
       **全市场买点池本来就是分散的**，当前口径下不需要中性化
