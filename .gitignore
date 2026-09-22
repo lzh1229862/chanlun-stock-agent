@@ -35,3 +35,6 @@ Thumbs.db
 
 # 自定义股票池（UI 保存，属于个人配置）
 config/watchlist.local.yaml
+
+# 临时脚本（调试用，别进版本库）
+_tmp_*.py
