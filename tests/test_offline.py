@@ -889,6 +889,40 @@ class TestMarketScan(unittest.TestCase):
         for bad in ("", None, "60051", "abcdef", "6005199"):
             self.assertFalse(self.ms.ok_code(bad, "测试"), repr(bad))
 
+    def _scan_db(self, td):
+        db = str(Path(td) / "scan.db")
+        self.ms.init_db(db)
+        return db
+
+    def _put(self, db, day, code, status):
+        from contextlib import closing
+        with closing(self.ms.connect(db)) as conn, conn:
+            conn.execute(
+                "INSERT INTO scan_state (scan_date, stock_code, status, n_hits,"
+                " note, scanned_at) VALUES (?,?,?,?,?,?)",
+                (day, code, status, 0, "", ""))
+
+    def test_failed_code_is_not_done(self):
+        """fail 不能算「已完成」。
+
+        回归：全市场那次 243 只 DNS 解析失败被当成已完成，重跑直接跳过 ——
+        4.9% 的股票会**永久**缺席，而且没有任何提示。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            db = self._scan_db(td)
+            for code, st in (("600000", "ok"), ("600001", "skip"),
+                             ("600002", "fail"), ("600003", "ok")):
+                self._put(db, "2026-09-21", code, st)
+            self.assertEqual(self.ms.done_codes("2026-09-21", db),
+                             {"600000", "600001", "600003"})
+
+    def test_done_codes_scoped_to_date(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = self._scan_db(td)
+            self._put(db, "2026-09-21", "600000", "ok")
+            self._put(db, "2026-09-18", "600009", "ok")
+            self.assertEqual(self.ms.done_codes("2026-09-21", db), {"600000"})
+
 
 SETTINGS_WITH_NAME = ('pool_name: "仓库样本池"' + chr(10)
                       + 'watchlist:' + chr(10) + '  - "600519"' + chr(10))

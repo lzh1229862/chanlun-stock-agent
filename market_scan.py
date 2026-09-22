@@ -287,9 +287,16 @@ def save_state(scan_date, code, status, n_hits=0, note="", db_path=None):
 
 
 def done_codes(scan_date, db_path=None):
+    """已算完成的代码 —— **失败的不算完成**。
+
+    原来 status 不分好坏，fail 也当成「已完成」。于是一次网络抖动（全市场那次实测
+    243 只 DNS 解析失败）就**永久**漏掉那些股票：重跑时被直接跳过，没人会知道。
+    判据改成只有非 fail 才算完成，失败的下次会被重新捡起来。
+    """
     with closing(connect(db_path)) as conn:
         return {r[0] for r in conn.execute(
-            "SELECT stock_code FROM scan_state WHERE scan_date=?", (scan_date,))}
+            "SELECT stock_code FROM scan_state WHERE scan_date=? AND status<>'fail'",
+            (scan_date,))}
 
 
 def scan_market(scan_date=None, codes=None, limit=None, window=DEFAULT_WINDOW,

@@ -54,6 +54,7 @@
 | 第 35 轮 | B9 统一长任务队列 | run_queue.py / run_queue.bat（ADR-036） |
 | 第 36 轮 | 竞品选股条件评估 + 「背驰强度」（MACD 面积比）预注册检验 | signal_features.py / verify_hypotheses.py / verify_multiple.py（ADR-037） |
 | 第 37 轮 | 修复「生成 AI 总结」的 NameError（code 没走 session_state）+ 补回归测试 | app.py / tests/test_offline.py（ADR-034 补记） |
+| 第 38 轮 | 全市场扫描跑完（5021 只，覆盖 99.96%）+ 修「失败被当成已完成」的续跑 bug | market_scan.py / tests/test_offline.py（ADR-022 补记） |
 
 ## 当前状态
 
