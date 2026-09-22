@@ -111,7 +111,8 @@ def connect(db_path=None):
 
 
 # 后加的列（scan_results 可能已存在旧版本）
-SCAN_NEW_COLUMNS = [("zs_width_pct", "REAL"), ("score", "INTEGER")]
+SCAN_NEW_COLUMNS = [("zs_width_pct", "REAL"), ("score", "INTEGER"),
+                    ("industry", "TEXT")]
 
 
 def init_db(db_path=None):
@@ -265,17 +266,81 @@ def save_hits(scan_date, hits, db_path=None):
     if not hits:
         return 0
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    import industry as im
+    m = im.load_map()                      # 没有行业数据时是空 dict，写成 None 即可
     rows = [(scan_date, h["stock_code"], h["stock_name"], h["signal_date"],
              h["confirm_date"], h["signal_type"], h["is_primary"],
              h.get("zs_gap_days"), h.get("zs_width_pct"), h.get("score"),
-             h["amount_yi"], ts) for h in hits]
+             h["amount_yi"], im.level_of(h["stock_code"], "次类", m) or None, ts)
+             for h in hits]
     with closing(connect(db_path)) as conn, conn:
         conn.executemany(
             "INSERT OR REPLACE INTO scan_results (scan_date, stock_code, stock_name,"
             " signal_date, confirm_date, signal_type, is_primary, zs_gap_days,"
-            " zs_width_pct, score, amount_yi, scanned_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " zs_width_pct, score, amount_yi, industry, scanned_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rows)
     return len(rows)
+
+
+def concentration_rows(scan_date, level="次类", rows=None, min_hits=4, db_path=None):
+    """命中池 vs 基准的行业集中度。返回按 lift 降序的 list（可能为空）。
+
+    **基准取 `scan_state` 里实际扫过的代码**，不去重新拉全市场名单 ——
+    这样既不用联网，分母也正好是「这次扫描的总体」，比名录更对。
+    """
+    import industry as im
+    m = im.load_map()
+    if not m:
+        return []
+    if rows is None:
+        rows, scan_date = query_scan(scan_date, db_path=db_path)
+    base = sorted(done_codes(scan_date, db_path)) if scan_date else []
+    if not base:
+        return []
+    hits = sorted({r["stock_code"] for r in rows})
+    return im.concentration(hits, base, level=level, mapping=m, min_hits=min_hits)
+
+
+def report_concentration(rows, scan_date=None, level="次类", top=10):
+    """命中池的行业集中度 vs 全市场基准。
+
+    只看命中数会被大行业天然占优误导（医药生物本来就有 230 只），
+    所以要比的是 `lift = 命中占比 / 全市场占比`。lift 接近 1 = 池子在行业上是均匀的。
+    """
+    res = concentration_rows(scan_date, level=level, rows=rows)
+    if not res:
+        print("  （算不出行业集中度：缺行业映射，或这批扫描没有基准）")
+        return []
+    hits = sorted({r["stock_code"] for r in rows})
+    uni = sorted(done_codes(scan_date)) if scan_date else []
+    print()
+    print("  行业集中度（%s 层级，命中 %d 只 / 基准 %d 只）" % (level, len(hits), len(uni)))
+    print("  %-20s %5s %6s %8s %8s %7s" % ("行业", "命中", "基准", "命中占比", "基准占比", "lift"))
+    for x in res[:top]:
+        print("  %-20s %5d %6d %7.1f%% %7.1f%% %6.2fx"
+              % (x["industry"], x["hits"], x["base"], 100 * x["hits_share"],
+                 100 * x["base_share"], x["lift"]))
+    print("  lift = 命中占比 / 基准占比；≈1 表示这个行业在池子里的权重和它在扫描总体里一样")
+    return res
+
+
+def backfill_industry(db_path=None):
+    """给已有的命中行补行业。行业映射是**全市场**的，所以历史扫描日也能补。"""
+    import industry as im
+    m = im.load_map()
+    if not m:
+        return 0
+    init_db(db_path)                      # 先跑迁移，否则老库还没有 industry 列
+    with closing(connect(db_path)) as conn, conn:
+        rows = conn.execute(
+            "SELECT rowid, stock_code FROM scan_results"
+            " WHERE industry IS NULL OR industry=''").fetchall()
+        upd = [(im.level_of(r[1], "次类", m) or None, r[0]) for r in rows]
+        if upd:
+            conn.executemany(
+                "UPDATE scan_results SET industry=? WHERE rowid=?", upd)
+    return len(upd)
 
 
 def save_state(scan_date, code, status, n_hits=0, note="", db_path=None):
@@ -394,7 +459,13 @@ def main():
     ap.add_argument("--no-batch", action="store_true",
                     help="不用批量行情补当日 K 线（默认用；只在收盘后生效）")
     ap.add_argument("--report", action="store_true", help="只看已扫结果")
+    ap.add_argument("--backfill-industry", action="store_true",
+                    help="给已有的命中行补行业（从全市场行业映射）")
     a = ap.parse_args()
+
+    if a.backfill_industry:
+        print("已补 %d 行行业" % backfill_industry())
+        return 0
 
     if a.report:
         rows, sd = query_scan(a.scan_date)
@@ -408,6 +479,7 @@ def main():
         print("  按类型:", by)
         far = sum(1 for r in rows if (r["zs_gap_days"] or -1) >= sg.GAP_THRESHOLD)
         print("  距中枢 >= %d 日（H3 提示）: %d 条" % (sg.GAP_THRESHOLD, far))
+        report_concentration(rows, sd)
         print()
         print("  %-8s %-8s %-11s %-12s %-12s %s"
               % ("代码", "名称", "类型", "信号日", "确认日", "距中枢"))

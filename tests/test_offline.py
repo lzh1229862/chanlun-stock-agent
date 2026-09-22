@@ -1359,3 +1359,92 @@ class TestSignalFeatures(unittest.TestCase):
         b.sdt = pd.Timestamp("1999-01-01")
         b.edt = pd.Timestamp("1999-02-01")
         self.assertIsNone(self.sf.bi_area(q, hist, b))
+
+
+class TestIndustry(unittest.TestCase):
+    """行业映射与集中度（离线，不联网）。"""
+
+    def setUp(self):
+        import industry
+        self.im = industry
+
+    def test_split_pads_and_strips(self):
+        self.assertEqual(self.im.split("信息技术 / 半导体 / 集成电路 / 集成电路制造"),
+                         ("信息技术", "半导体", "集成电路", "集成电路制造"))
+        self.assertEqual(self.im.split("金融/银行"), ("金融", "银行", "", ""))
+        self.assertEqual(self.im.split(""), ("", "", "", ""))
+        self.assertEqual(self.im.split(None), ("", "", "", ""))
+
+    def test_level_of_uses_given_mapping(self):
+        m = {"600519": "主要消费 / 食品、饮料与烟草 / 酒 / 白酒"}
+        self.assertEqual(self.im.level_of("600519", "门类", m), "主要消费")
+        self.assertEqual(self.im.level_of("600519", "次类", m), "食品、饮料与烟草")
+        self.assertEqual(self.im.level_of("600519", "中类", m), "白酒")
+        self.assertEqual(self.im.level_of("999999", "门类", m), "")
+
+    def test_code_normalization(self):
+        m = {"000001": "金融 / 银行 / 商业银行 / 综合性银行"}
+        self.assertEqual(self.im.level_of("000001.SZ", "门类", m), "金融")
+        self.assertEqual(self.im.level_of("1", "门类", {"000001": "金融"}), "金融")
+
+    def test_concentration_lift(self):
+        # 甲 6 只 / 乙 2 只；命中各 1 只 -> 甲 lift 0.67x，乙 lift 2.00x
+        m = {c: "甲 / 一 / x / y" for c in
+             ("111111", "111112", "111113", "111114", "111115", "111116")}
+        m.update({c: "乙 / 三 / x / y" for c in ("222221", "222222")})
+        res = self.im.concentration(["111111", "222221"], list(m), level="门类",
+                                    mapping=m, min_hits=1)
+        by = {x["industry"]: x for x in res}
+        self.assertAlmostEqual(by["甲"]["hits_share"], 0.5)
+        self.assertAlmostEqual(by["甲"]["base_share"], 6 / 8)
+        self.assertAlmostEqual(by["甲"]["lift"], 0.5 / (6 / 8))
+        self.assertAlmostEqual(by["乙"]["lift"], 0.5 / (2 / 8))
+        self.assertEqual(res[0]["industry"], "乙")          # 按 lift 降序
+
+    def test_concentration_ignores_unknown_and_respects_min_hits(self):
+        m = {"111111": "甲 / 一 / x / y"}
+        self.assertEqual(self.im.concentration(["999999"], ["111111"],
+                                              mapping=m, min_hits=1), [])
+        m2 = {"111111": "甲 / 一 / x / y", "222221": "乙 / 三 / x / y"}
+        self.assertEqual(self.im.concentration(["111111"], ["111111", "222221"],
+                                              mapping=m2, min_hits=2), [])
+
+    def test_build_failure_semantics(self):
+        """抛异常（网络）-> 不记录，下次重试；返回空串（源里没有）-> 记录为终局。
+
+        这条是 ADR-022 那次的教训：**把网络失败当成「查过了」，一次抖动就永久漏数据**。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            saved = (self.im.CACHE, self.im.fetch_one)
+            self.im.CACHE = Path(td) / "ind.json"
+            try:
+                calls = []
+
+                def fake(code):
+                    calls.append(code)
+                    if code == "999002":
+                        raise ConnectionError("测试：网络断了")
+                    return "甲 / 一 / x / y" if code == "999001" else ""
+
+                self.im.fetch_one = fake
+                codes = ["999001", "999002", "999003"]   # 用不存在的代码，避开真实 profiles 种子
+                m = self.im.build(codes, verbose=False, progress=99)
+                self.assertEqual(m.get("999001"), "甲 / 一 / x / y")
+                self.assertEqual(m.get("999003"), "")        # 源里没有 -> 终局
+                self.assertNotIn("999002", m)                # 网络失败 -> 不记录
+                # 再跑一次：已记录的 1/3 不再请求，只有失败的 2 重试
+                calls.clear()
+                self.im.build(codes, verbose=False, progress=99)
+                self.assertEqual(calls, ["999002"])
+            finally:
+                self.im.CACHE, self.im.fetch_one = saved
+
+    def test_concentration_rows_degrades_without_map(self):
+        """没有行业数据时要静默返回空，不能把扫描页搞崩。"""
+        import market_scan as ms
+        saved = self.im.load_map
+        self.im.load_map = lambda: {}
+        try:
+            self.assertEqual(ms.concentration_rows("2026-09-21"), [])
+        finally:
+            self.im.load_map = saved

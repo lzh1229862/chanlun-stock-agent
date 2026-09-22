@@ -322,7 +322,8 @@ def render_scan_page():
 
     df = pd.DataFrame([{
         "打分": score_label(r.get("score")),
-        "代码": r["stock_code"], "名称": r["stock_name"], "类型": r["signal_type"],
+        "代码": r["stock_code"], "名称": r["stock_name"],
+        "行业": r.get("industry") or "—", "类型": r["signal_type"],
         "信号日": r["signal_date"], "确认日": r["confirm_date"],
         "距中枢": gap_label(r["zs_gap_days"]), "成交额(亿)": r["amount_yi"],
     } for r in sel])  # rows 已按 score 从高到低排
@@ -339,6 +340,30 @@ def render_scan_page():
         st.session_state["_jump_code"] = str(df.iloc[picked[0]]["代码"])
         st.rerun()
 
+    # 行业集中度：池子是「普遍活跃」还是「一个主题的几百只」——
+    # 只看命中数会被大行业天然占优误导，所以比的是 lift = 命中占比 / 基准占比。
+    try:
+        conc = mscan.concentration_rows(sd)
+    except Exception:
+        conc = []
+    if conc:
+        with st.expander(
+                "行业集中度（池子是不是挤在一个行业里？）", expanded=False):
+            cdf = pd.DataFrame([{
+                "行业": x["industry"], "命中": x["hits"], "基准": x["base"],
+                "命中占比": f'{x["hits_share"]:.1%}',
+                "基准占比": f'{x["base_share"]:.1%}',
+                "lift": f'{x["lift"]:.2f}x',
+            } for x in conc[:15]])
+            st.dataframe(cdf, width="stretch", hide_index=True)
+            top = conc[0]
+            st.caption(
+                f"lift = 命中占比 ÷ 基准占比（基准 = 本次实际扫过的股票）。"
+                f"**最高的是「{top['industry']}」{top['lift']:.2f}x** —— 越大越集中。"
+                "lift ≈ 1 说明这个行业在池子里的权重和它在全市场里一样，"
+                "即**池子在行业上基本是均匀的**，不是某个主题的堆积。"
+                "行业来自巨潮中证行业分类（四级），缓存 30 天。"
+            )
     st.caption("打分行 = 「中枢宽度 ≥ 0.12」+「距中枢结束 < 10 日」。"
                "**已通过时间样本外验证**（训练 2015-2020 / 检验 2021-2026，ADR-024）："
                "检验期两个条件都满足的信号，5/10/20 日超额 +2.98% / +3.34% / +4.07%，"
